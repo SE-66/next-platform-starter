@@ -58,18 +58,42 @@ function renderFindings(findings) {
     return;
   }
 
-  findingsEl.innerHTML = findings.map(finding => `
-    <article class="finding">
-      <div class="severity ${esc(finding.severity)}">${esc(finding.severity)}</div>
-      <h3>${esc(finding.title)}</h3>
-      <p>${esc(finding.details)}</p>
-      <div class="meta">
-        ${finding.sheet ? esc(finding.sheet) : ""}
-        ${finding.cell ? " · " + esc(finding.cell) : ""}
-        · ${esc(finding.code)}
-      </div>
-    </article>
-  `).join("");
+  findingsEl.innerHTML = findings.map(finding => {
+    const evidence = finding.evidence || {};
+    const causes = Array.isArray(evidence.rootCauseCandidates)
+      ? evidence.rootCauseCandidates
+      : [];
+    const materiality = evidence.materiality || null;
+    const topCause = causes[0];
+
+    return `
+      <article class="finding">
+        <div class="severity ${esc(finding.severity)}">${esc(finding.severity)}</div>
+        <h3>${esc(finding.title)}</h3>
+        <p>${esc(finding.details)}</p>
+        ${topCause ? `
+          <p class="meta">
+            Likely root cause: <code>${esc(topCause.cellKey)}</code>
+            · score ${esc(Math.round(Number(topCause.score || 0) * 100))}%
+            · ${esc(topCause.reason)}
+          </p>
+        ` : ""}
+        ${materiality && materiality.rank ? `
+          <p class="meta">
+            Materiality: ${esc(materiality.rank)}
+            ${materiality.relativeImpact === undefined
+              ? ""
+              : " · " + esc((Number(materiality.relativeImpact) * 100).toFixed(1)) + "% relative impact"}
+          </p>
+        ` : ""}
+        <div class="meta">
+          ${finding.sheet ? esc(finding.sheet) : ""}
+          ${finding.cell ? " · " + esc(finding.cell) : ""}
+          · ${esc(finding.code)}
+        </div>
+      </article>
+    `;
+  }).join("");
 }
 
 function renderSemanticNodes(nodes) {
