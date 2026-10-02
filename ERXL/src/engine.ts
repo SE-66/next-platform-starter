@@ -209,35 +209,58 @@ function detectFormulaOutliers(nodes: CellNode[]): Finding[] {
     bySheetRow.get(key)!.push(n);
   }
 
-  for (const cells of bySheetRow.values()) {
-    const formulas = cells.filter(c => c.formula);
+  for (const rowCells of bySheetRow.values()) {
+    const formulas = rowCells
+      .filter(c => c.formula)
+      .sort((a, b) => a.col - b.col);
+
     if (formulas.length < 4) continue;
 
-    const counts = new Map<string, number>();
-    for (const c of formulas) {
-      const pattern = normalizeFormula(c.formula!, c);
-      counts.set(pattern, (counts.get(pattern) || 0) + 1);
+    // Compare only contiguous formula bands. This prevents a summary KPI at B4
+    // from being compared with a separate chart series at E4:J4.
+    const bands: CellNode[][] = [];
+    let currentBand: CellNode[] = [];
+
+    for (const cell of formulas) {
+      const previous = currentBand[currentBand.length - 1];
+      if (!previous || cell.col - previous.col <= 1) {
+        currentBand.push(cell);
+      } else {
+        if (currentBand.length) bands.push(currentBand);
+        currentBand = [cell];
+      }
     }
+    if (currentBand.length) bands.push(currentBand);
 
-    const [modalPattern, modalCount] =
-      [...counts.entries()].sort((a, b) => b[1] - a[1])[0] || [];
+    for (const band of bands) {
+      if (band.length < 4) continue;
 
-    if (!modalPattern || modalCount < 3) continue;
+      const counts = new Map<string, number>();
+      for (const c of band) {
+        const pattern = normalizeFormula(c.formula!, c);
+        counts.set(pattern, (counts.get(pattern) || 0) + 1);
+      }
 
-    for (const c of formulas) {
-      const pattern = normalizeFormula(c.formula!, c);
-      if (pattern !== modalPattern && (counts.get(pattern) || 0) === 1) {
-        findings.push({
-          id: id("finding"),
-          severity: "medium",
-          code: "FORMULA_OUTLIER",
-          title: "Formula pattern differs from neighboring row formulas",
-          sheet: c.sheet,
-          cell: c.address,
-          details:
-            "This formula is a one-off pattern inside a row dominated by another formula structure.",
-          evidence: { formula: c.formula, dominantPattern: modalPattern }
-        });
+      const [modalPattern, modalCount] =
+        [...counts.entries()].sort((a, b) => b[1] - a[1])[0] || [];
+
+      if (!modalPattern || modalCount < 3) continue;
+
+      for (const c of band) {
+        const pattern = normalizeFormula(c.formula!, c);
+        if (pattern !== modalPattern && (counts.get(pattern) || 0) === 1) {
+          findings.push({
+            id: id("finding"),
+            severity: "medium",
+            code: "FORMULA_OUTLIER",
+            title: "Formula pattern differs from neighboring row formulas",
+            sheet: c.sheet,
+            cell: c.address,
+            details:
+              "This formula is a one-off pattern inside a contiguous formula sequence dominated by another relative-reference structure.",
+            evidence: { formula: c.formula, dominantPattern: modalPattern }
+          });
+        }
       }
     }
   }
@@ -449,7 +472,8 @@ export function analyzeWorkbook(
   const workbook = XLSX.read(bytes, {
     type: "array",
     cellFormula: true,
-    cellText: true
+    cellText: true,
+    sheetStubs: true
   });
 
   const nodes: CellNode[] = [];
