@@ -6,6 +6,7 @@ import type {
   RootCauseCandidate,
   SemanticIdentityAssessment,
   SemanticNode,
+  SemanticViolationGroup,
   SemanticRole
 } from "./types";
 
@@ -161,6 +162,167 @@ function exactProductMateriality(
   };
 }
 
+
+function equityBridgeMateriality(
+  evaluator: WorkbookEvaluator,
+  target: SemanticNode,
+  nodes: SemanticNode[]
+): MaterialityEstimate | undefined {
+  const enterpriseValue = findPeer("enterprise_value", target, nodes);
+  const debt = findPeer("debt", target, nodes);
+  const cash = findPeer("cash", target, nodes);
+
+  if (!enterpriseValue || !debt) return undefined;
+
+  try {
+    const actual = evaluator.evaluateNumber(target.key);
+    const expected =
+      evaluator.evaluateNumber(enterpriseValue.key) -
+      evaluator.evaluateNumber(debt.key) +
+      (cash ? evaluator.evaluateNumber(cash.key) : 0);
+
+    if (!Number.isFinite(actual) || !Number.isFinite(expected)) return undefined;
+
+    const absoluteImpact = Math.abs(actual - expected);
+    const relativeImpact =
+      absoluteImpact / Math.max(Math.abs(expected), 1e-9);
+
+    return {
+      actual,
+      expected,
+      absoluteImpact,
+      relativeImpact,
+      rank: rankMateriality(relativeImpact)
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function materialityRankValue(rank: MaterialityEstimate["rank"] | undefined): number {
+  return {
+    unknown: 0,
+    low: 1,
+    medium: 2,
+    high: 3,
+    critical: 4
+  }[rank || "unknown"];
+}
+
+function compactAffectedRange(cells: string[]): string {
+  if (!cells.length) return "";
+
+  const decoded = cells
+    .map(cell => ({ cell, pos: XLSX.utils.decode_cell(cell) }))
+    .sort((a, b) => a.pos.r - b.pos.r || a.pos.c - b.pos.c);
+
+  const sameRow = decoded.every(item => item.pos.r === decoded[0].pos.r);
+  const sameCol = decoded.every(item => item.pos.c === decoded[0].pos.c);
+
+  if (decoded.length > 1 && (sameRow || sameCol)) {
+    const first = decoded[0];
+    const last = decoded[decoded.length - 1];
+    const contiguous = decoded.every((item, index) => {
+      if (index === 0) return true;
+      const previous = decoded[index - 1].pos;
+      return sameRow
+        ? item.pos.c === previous.c + 1
+        : item.pos.r === previous.r + 1;
+    });
+
+    if (contiguous) return first.cell + ":" + last.cell;
+  }
+
+  return decoded.map(item => item.cell).join(", ");
+}
+
+export function groupSemanticIdentityViolations(
+  assessments: SemanticIdentityAssessment[]
+): SemanticViolationGroup[] {
+  const buckets = new Map<string, SemanticIdentityAssessment[]>();
+
+  for (const assessment of assessments) {
+    if (assessment.status !== "violated") continue;
+
+    const bestCompeting = [...assessment.hypotheses]
+      .filter(hypothesis => !hypothesis.canonical)
+      .sort((a, b) => b.score - a.score)[0];
+
+    const key = [
+      assessment.sheet,
+      assessment.targetRole,
+      assessment.identityName,
+      assessment.semanticExpression,
+      bestCompeting?.name || ""
+    ].join("|");
+
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key)!.push(assessment);
+  }
+
+  const groups: SemanticViolationGroup[] = [];
+
+  for (const bucket of buckets.values()) {
+    const sorted = [...bucket].sort((a, b) => {
+      const left = XLSX.utils.decode_cell(a.cell);
+      const right = XLSX.utils.decode_cell(b.cell);
+      return left.r - right.r || left.c - right.c;
+    });
+
+    const worstMateriality = sorted
+      .map(item => item.materiality)
+      .filter((item): item is MaterialityEstimate => Boolean(item))
+      .sort((a, b) => {
+        const rankDelta =
+          materialityRankValue(b.rank) - materialityRankValue(a.rank);
+        if (rankDelta) return rankDelta;
+        return (b.relativeImpact || 0) - (a.relativeImpact || 0);
+      })[0];
+
+    const uniqueCauses = new Map<string, RootCauseCandidate>();
+    for (const assessment of sorted) {
+      for (const cause of assessment.rootCauseCandidates) {
+        const prior = uniqueCauses.get(cause.cellKey);
+        if (!prior || cause.score > prior.score) {
+          uniqueCauses.set(cause.cellKey, cause);
+        }
+      }
+    }
+
+    const confidence =
+      sorted.reduce((sum, item) => sum + item.confidence, 0) / sorted.length;
+
+    groups.push({
+      id: id("identity_group"),
+      identityName: sorted[0].identityName,
+      targetRole: sorted[0].targetRole,
+      sheet: sorted[0].sheet,
+      affectedCells: sorted.map(item => item.cell),
+      affectedRange: compactAffectedRange(sorted.map(item => item.cell)),
+      affectedCount: sorted.length,
+      canonicalExpression: sorted[0].canonicalExpression,
+      semanticExpression: sorted[0].semanticExpression,
+      explanation: sorted[0].explanation,
+      confidence: Number(confidence.toFixed(2)),
+      hypotheses: sorted[0].hypotheses,
+      assessmentIds: sorted.map(item => item.id),
+      rootCauseCandidates: [...uniqueCauses.values()].sort(
+        (a, b) => b.score - a.score
+      ),
+      worstMateriality
+    });
+  }
+
+  return groups.sort((a, b) => {
+    const materialityDelta =
+      materialityRankValue(b.worstMateriality?.rank) -
+      materialityRankValue(a.worstMateriality?.rank);
+    if (materialityDelta) return materialityDelta;
+    if (b.affectedCount !== a.affectedCount) return b.affectedCount - a.affectedCount;
+    return b.confidence - a.confidence;
+  });
+}
+
 const IDENTITY_RULES: IdentityRule[] = [
   {
     targetRole: "enterprise_value",
@@ -265,7 +427,8 @@ const IDENTITY_RULES: IdentityRule[] = [
         canonical: false,
         requiredRoles: ["revenue", "debt"]
       }
-    ]
+    ],
+    materiality: equityBridgeMateriality
   },
   {
     targetRole: "interest_expense",
