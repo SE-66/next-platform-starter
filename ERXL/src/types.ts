@@ -51,6 +51,7 @@ export interface Finding {
     | "BALANCE_SHEET_MISMATCH"
     | "SEMANTIC_DEPENDENCY_OUTLIER"
     | "SEMANTIC_IDENTITY_VIOLATION"
+    | "AUTOMATIC_HYPOTHESIS_MISMATCH"
     | "COUNTERFACTUAL_TEST_FAILURE";
   title: string;
   sheet?: string;
@@ -122,6 +123,78 @@ export type ExpectedDirection =
   | "not_increase"
   | "not_decrease";
 
+export type HypothesisOperator =
+  | "add"
+  | "subtract"
+  | "multiply"
+  | "divide"
+  | "subtract_add"
+  | "average_multiply"
+  | "average_multiply_sum_rates"
+  | "average_multiply_diff_rates";
+
+export interface GeneratedHypothesis {
+  id: string;
+  targetNodeId: string;
+  targetKey: string;
+  targetRole: SemanticRole;
+  sheet: string;
+  cell: string;
+  operator: HypothesisOperator;
+  expression: string;
+  semanticExpression: string;
+  sourceNodeIds: string[];
+  sourceKeys: string[];
+  sourceRoles: SemanticRole[];
+  dimensionalScore: number;
+  semanticAffinityScore: number;
+  simplicityScore: number;
+  plausibilityScore: number;
+  baselinePrediction?: number;
+  generationBasis: string;
+}
+
+export interface HypothesisPrediction {
+  hypothesisId: string;
+  expression: string;
+  baseline?: number;
+  perturbed?: number;
+  delta?: number;
+  normalizedError?: number;
+  error?: string;
+}
+
+export interface HypothesisExperiment {
+  id: string;
+  targetNodeId: string;
+  targetKey: string;
+  targetRole: SemanticRole;
+  sheet: string;
+  cell: string;
+  candidateIds: string[];
+  preferredHypothesisId: string;
+  implementedHypothesisId?: string;
+  preferredExpression: string;
+  implementedExpression?: string;
+  perturbation?: {
+    semanticNodeId: string;
+    key: string;
+    role: SemanticRole;
+    baselineValue: number;
+    perturbationPercent: number;
+    perturbedValue: number;
+  };
+  baselineTarget?: number;
+  observedTarget?: number;
+  predictions: HypothesisPrediction[];
+  status: "executed" | "ambiguous" | "unsupported";
+  mismatch: boolean;
+  implementedMatchScore?: number;
+  plausibilityGap?: number;
+  explanation: string;
+  materiality?: MaterialityEstimate;
+}
+
 export interface CounterfactualTest {
   id: string;
   title: string;
@@ -163,6 +236,9 @@ export interface WorkbookSummary {
   identityChecks: number;
   identityViolations: number;
   identityViolationGroups: number;
+  generatedHypotheses: number;
+  hypothesisExperiments: number;
+  hypothesisMismatches: number;
   counterfactualTests: number;
   testsPassed: number;
   testsFailed: number;
@@ -178,5 +254,7 @@ export interface AnalysisResult {
   semanticNodes: SemanticNode[];
   identityAssessments: SemanticIdentityAssessment[];
   identityViolationGroups: SemanticViolationGroup[];
+  generatedHypotheses: GeneratedHypothesis[];
+  hypothesisExperiments: HypothesisExperiment[];
   counterfactualTests: CounterfactualTest[];
 }
