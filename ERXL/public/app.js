@@ -35,6 +35,7 @@ function renderMetrics(summary) {
     ["Findings", summary.findings],
     ["Identity checks", summary.identityChecks],
     ["Identity violations", summary.identityViolations],
+    ["Issue families", summary.identityViolationGroups],
     ["Tests", summary.counterfactualTests],
     ["Passed", summary.testsPassed],
     ["Failed", summary.testsFailed],
@@ -132,10 +133,10 @@ function renderSemanticNodes(nodes) {
 }
 
 
-function renderIdentities(assessments) {
+function renderIdentities(assessments, groups) {
   const violations = assessments.filter(item => item.status === "violated");
   identityCount.textContent =
-    `${assessments.length} checked · ${violations.length} violated`;
+    `${assessments.length} checked · ${violations.length} cell violations · ${groups.length} issue families`;
 
   if (!assessments.length) {
     identityEl.innerHTML =
@@ -143,34 +144,68 @@ function renderIdentities(assessments) {
     return;
   }
 
-  identityEl.innerHTML = assessments.slice(0, 60).map(item => {
-    const bestCompeting = (item.hypotheses || [])
+  const groupCards = groups.map(group => {
+    const bestCompeting = (group.hypotheses || [])
       .filter(h => !h.canonical)
       .sort((a, b) => b.score - a.score)[0];
 
-    const materiality = item.materiality;
-    const materialityText = materiality && materiality.rank !== "unknown"
-      ? ` · Materiality: ${esc(materiality.rank)}${materiality.relativeImpact === undefined ? "" : " (" + esc((materiality.relativeImpact * 100).toFixed(1)) + "%)"}`
-      : "";
+    const materiality = group.worstMateriality;
+    const materialityText =
+      materiality && materiality.rank !== "unknown"
+        ? ` · Materiality: ${esc(materiality.rank)}${materiality.relativeImpact === undefined ? "" : " (" + esc((materiality.relativeImpact * 100).toFixed(1)) + "%)"}`
+        : "";
 
     return `
       <article class="finding">
-        <div class="severity ${item.status === "violated" ? "high" : item.status === "confirmed" ? "low" : "medium"}">
-          ${esc(item.status)}
+        <div class="severity ${materiality?.rank === "critical" ? "critical" : group.confidence >= 0.85 ? "high" : "medium"}">
+          issue family
         </div>
-        <h3>${esc(item.identityName)}</h3>
-        <p><strong>Expected:</strong> ${esc(item.canonicalExpression)}</p>
-        <p><strong>Observed semantics:</strong> <code>${esc(item.semanticExpression)}</code></p>
-        <p>${esc(item.explanation)}</p>
+        <h3>${esc(group.identityName)}</h3>
+        <p><strong>Expected:</strong> ${esc(group.canonicalExpression)}</p>
+        <p><strong>Observed semantics:</strong> <code>${esc(group.semanticExpression)}</code></p>
+        <p>${esc(group.explanation)}</p>
         <div class="meta">
-          ${esc(item.sheet)}!${esc(item.cell)}
-          · confidence ${pct(item.confidence)}
+          ${esc(group.sheet)}!${esc(group.affectedRange)}
+          · ${esc(group.affectedCount)} affected period${group.affectedCount === 1 ? "" : "s"}
+          · confidence ${pct(group.confidence)}
           ${bestCompeting ? " · competing: " + esc(bestCompeting.name) + " (" + esc(Math.round(bestCompeting.score * 100)) + "%)" : ""}
           ${materialityText}
         </div>
       </article>
     `;
   }).join("");
+
+  const nonViolations = assessments
+    .filter(item => item.status !== "violated")
+    .slice(0, 24)
+    .map(item => {
+      const bestCompeting = (item.hypotheses || [])
+        .filter(h => !h.canonical)
+        .sort((a, b) => b.score - a.score)[0];
+
+      return `
+        <article class="finding">
+          <div class="severity ${item.status === "confirmed" ? "low" : "medium"}">
+            ${esc(item.status)}
+          </div>
+          <h3>${esc(item.identityName)}</h3>
+          <p><strong>Expected:</strong> ${esc(item.canonicalExpression)}</p>
+          <p><strong>Observed semantics:</strong> <code>${esc(item.semanticExpression)}</code></p>
+          <p>${esc(item.explanation)}</p>
+          <div class="meta">
+            ${esc(item.sheet)}!${esc(item.cell)}
+            · confidence ${pct(item.confidence)}
+            ${bestCompeting ? " · competing: " + esc(bestCompeting.name) + " (" + esc(Math.round(bestCompeting.score * 100)) + "%)" : ""}
+          </div>
+        </article>
+      `;
+    }).join("");
+
+  identityEl.innerHTML =
+    groupCards +
+    (nonViolations
+      ? '<div class="eyebrow" style="margin-top:24px">Confirmed / ambiguous samples</div>' + nonViolations
+      : "");
 }
 
 function renderTests(tests) {
@@ -240,7 +275,10 @@ form.addEventListener("submit", async event => {
     renderMetrics(data.summary);
     renderFindings(data.findings || []);
     renderSemanticNodes(data.semanticNodes || []);
-    renderIdentities(data.identityAssessments || []);
+    renderIdentities(
+      data.identityAssessments || [],
+      data.identityViolationGroups || []
+    );
     renderTests(data.counterfactualTests || []);
 
     runMeta.innerHTML =
