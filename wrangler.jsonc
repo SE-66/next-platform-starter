@@ -1,8 +1,10 @@
 {
-  "$schema": "./ERXL/node_modules/wrangler/config-schema.json",
-  "name": "erxl",
+  "name": "next-platform-starter",
   "main": "ERXL/src/index.ts",
   "compatibility_date": "2026-10-02",
+  "build": {
+    "command": "npm --prefix ERXL install --ignore-scripts"
+  },
   "vars": {
     "SUPABASE_URL": "https://fganrvamurjqtbslaqys.supabase.co"
   },
