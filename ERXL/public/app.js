@@ -6,9 +6,11 @@ const resultsEl = document.querySelector("#results");
 const metricsEl = document.querySelector("#metrics");
 const findingsEl = document.querySelector("#findings");
 const semanticEl = document.querySelector("#semantic-nodes");
+const identityEl = document.querySelector("#identity-assessments");
 const testsEl = document.querySelector("#tests");
 const findingCount = document.querySelector("#finding-count");
 const semanticCount = document.querySelector("#semantic-count");
+const identityCount = document.querySelector("#identity-count");
 const testCount = document.querySelector("#test-count");
 const runMeta = document.querySelector("#run-meta");
 
@@ -31,6 +33,8 @@ function renderMetrics(summary) {
     ["Sheets", summary.sheets],
     ["Formulas", summary.formulaCells],
     ["Findings", summary.findings],
+    ["Identity checks", summary.identityChecks],
+    ["Identity violations", summary.identityViolations],
     ["Tests", summary.counterfactualTests],
     ["Passed", summary.testsPassed],
     ["Failed", summary.testsFailed],
@@ -103,6 +107,48 @@ function renderSemanticNodes(nodes) {
   `;
 }
 
+
+function renderIdentities(assessments) {
+  const violations = assessments.filter(item => item.status === "violated");
+  identityCount.textContent =
+    `${assessments.length} checked · ${violations.length} violated`;
+
+  if (!assessments.length) {
+    identityEl.innerHTML =
+      '<div class="empty">No supported financial identities were available for this workbook.</div>';
+    return;
+  }
+
+  identityEl.innerHTML = assessments.slice(0, 60).map(item => {
+    const bestCompeting = (item.hypotheses || [])
+      .filter(h => !h.canonical)
+      .sort((a, b) => b.score - a.score)[0];
+
+    const materiality = item.materiality;
+    const materialityText = materiality && materiality.rank !== "unknown"
+      ? ` · Materiality: ${esc(materiality.rank)}${materiality.relativeImpact === undefined ? "" : " (" + esc((materiality.relativeImpact * 100).toFixed(1)) + "%)"}`
+      : "";
+
+    return `
+      <article class="finding">
+        <div class="severity ${item.status === "violated" ? "high" : item.status === "confirmed" ? "low" : "medium"}">
+          ${esc(item.status)}
+        </div>
+        <h3>${esc(item.identityName)}</h3>
+        <p><strong>Expected:</strong> ${esc(item.canonicalExpression)}</p>
+        <p><strong>Observed semantics:</strong> <code>${esc(item.semanticExpression)}</code></p>
+        <p>${esc(item.explanation)}</p>
+        <div class="meta">
+          ${esc(item.sheet)}!${esc(item.cell)}
+          · confidence ${pct(item.confidence)}
+          ${bestCompeting ? " · competing: " + esc(bestCompeting.name) + " (" + esc(Math.round(bestCompeting.score * 100)) + "%)" : ""}
+          ${materialityText}
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
 function renderTests(tests) {
   testCount.textContent = `${tests.length} generated`;
 
@@ -132,6 +178,8 @@ function renderTests(tests) {
             ${test.baselineOutput === undefined ? "" : " · Output: " + esc(test.baselineOutput)}
             ${test.perturbedOutput === undefined ? "" : " → " + esc(test.perturbedOutput)}
             ${test.observedDirection ? " · Observed: " + esc(test.observedDirection) : ""}
+            ${test.materialityRank ? " · Materiality: " + esc(test.materialityRank) : ""}
+            ${test.relativeImpact === undefined ? "" : " (" + esc((test.relativeImpact * 100).toFixed(1)) + "%)"}
             · Path length: ${esc(test.dependencyPath.length)}
           </div>
           ${test.executionError ? `<p class="meta">Not executed: ${esc(test.executionError)}</p>` : ""}
@@ -168,6 +216,7 @@ form.addEventListener("submit", async event => {
     renderMetrics(data.summary);
     renderFindings(data.findings || []);
     renderSemanticNodes(data.semanticNodes || []);
+    renderIdentities(data.identityAssessments || []);
     renderTests(data.counterfactualTests || []);
 
     runMeta.innerHTML =
