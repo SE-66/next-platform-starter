@@ -673,7 +673,7 @@ class FormulaParser {
 
     if (this.current.type === "ref") {
       const start = this.advance().value;
-      if (this.current.type === "colon") {
+      if ((this.current as Token).type === "colon") {
         this.advance();
         const end = this.expect("ref").value;
         return this.resolveRange(start, end, this.currentSheet);
@@ -687,7 +687,7 @@ class FormulaParser {
       if (name.toUpperCase() === "TRUE") return true;
       if (name.toUpperCase() === "FALSE") return false;
 
-      if (this.current.type !== "lparen") {
+      if ((this.current as Token).type !== "lparen") {
         throw new UnsupportedFormulaError("Unsupported named value: " + name);
       }
 
