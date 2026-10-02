@@ -173,6 +173,45 @@ function label(node: SemanticNode): string {
   return node.role.replace(/_/g, " ");
 }
 
+
+function normalizeSheetName(sheet: string): string {
+  return sheet.replace(/^'/, "").replace(/'$/, "").replace(/''/g, "'");
+}
+
+function semanticizeObservedFormula(
+  formula: string,
+  currentSheet: string,
+  byKey: Map<string, SemanticNode>
+): string {
+  const refRe =
+    /(?:(?:'([^']+(?:''[^']+)*)'|([A-Za-z_][A-Za-z0-9_. -]*))!)?\$?([A-Z]{1,3})\$?(\d+)/g;
+
+  let output = "";
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = refRe.exec(formula)) !== null) {
+    output += formula.slice(cursor, match.index);
+
+    const sheet = normalizeSheetName(
+      match[1] || match[2] || currentSheet
+    ).trim();
+    const key = sheet + "!" + match[3].toUpperCase() + match[4];
+    const role = byKey.get(key)?.role;
+
+    output += role && role !== "unknown" ? "@" + role : "@cell";
+    cursor = match.index + match[0].length;
+  }
+
+  output += formula.slice(cursor);
+
+  return output
+    .replace(/^=/, "")
+    .replace(/\b\d+(?:\.\d+)?\b/g, "num")
+    .replace(/\s+/g, "")
+    .toLowerCase();
+}
+
 function expressionFor(
   operator: HypothesisOperator,
   sources: SemanticNode[]
@@ -768,9 +807,31 @@ export function runAutomaticHypothesisExperiments(
     const target = byId.get(targetNodeId);
     if (!target || !target.formula) continue;
 
-    const candidates = [...targetHypotheses]
-      .sort((a, b) => b.plausibilityScore - a.plausibilityScore)
-      .slice(0, maxCandidatesPerExperiment);
+    const rankedCandidates = [...targetHypotheses]
+      .sort((a, b) => b.plausibilityScore - a.plausibilityScore);
+
+    const byKey = new Map(nodes.map(node => [node.key, node]));
+    const observedSemanticExpression = semanticizeObservedFormula(
+      target.formula,
+      target.sheet,
+      byKey
+    );
+
+    const observedShapeCandidates = rankedCandidates.filter(
+      candidate =>
+        candidate.semanticExpression.toLowerCase() ===
+        observedSemanticExpression
+    );
+
+    const candidates = [
+      ...rankedCandidates.slice(0, Math.max(2, maxCandidatesPerExperiment - 2)),
+      ...observedShapeCandidates
+    ]
+      .filter(
+        (candidate, index, array) =>
+          array.findIndex(item => item.id === candidate.id) === index
+      )
+      .slice(0, maxCandidatesPerExperiment + 2);
 
     if (candidates.length < 2) continue;
 
