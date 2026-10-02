@@ -37,6 +37,8 @@ const ROLE_PATTERNS: Array<{
   { role: "ebitda_margin", confidence: 0.96, patterns: [/\bebitda margin\b/i] },
   { role: "gross_margin", confidence: 0.96, patterns: [/\bgross margin\b/i] },
   { role: "gross_profit", confidence: 0.96, patterns: [/\bgross profit\b/i] },
+  { role: "cogs", confidence: 0.95, patterns: [/^cogs(?:\s*\([^)]*\))?$/i, /\bcost of goods sold\b/i, /\bcost of sales\b/i] },
+  { role: "sga", confidence: 0.93, patterns: [/^sg&a(?:\s*\([^)]*\))?$/i, /^sga(?:\s*\([^)]*\))?$/i, /\bselling[,]? general (?:and|&) administrative\b/i] },
   { role: "working_capital", confidence: 0.94, patterns: [/\bnet working capital\b/i, /\bworking capital\b/i, /^nwc$/i] },
   { role: "revenue", confidence: 0.94, patterns: [/^revenue(?:\s*\([^)]*\))?$/i, /^net sales(?:\s*\([^)]*\))?$/i, /^sales(?:\s*\([^)]*\))?$/i, /^turnover(?:\s*\([^)]*\))?$/i] },
   { role: "ebitda", confidence: 0.94, patterns: [/\bebitda\b/i] },
