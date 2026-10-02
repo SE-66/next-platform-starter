@@ -6,7 +6,10 @@ import {
   type SemanticCell
 } from "./semantics";
 import { executeCounterfactualTests } from "./counterfactual-executor";
-import { analyzeSemanticIdentities } from "./semantic-identities";
+import {
+  analyzeSemanticIdentities,
+  groupSemanticIdentityViolations
+} from "./semantic-identities";
 import type { AnalysisResult, Finding, Severity } from "./types";
 
 const ERROR_VALUES = new Set([
@@ -546,15 +549,15 @@ export function analyzeWorkbook(
     semanticNodes,
     extractRefs
   );
+  const identityViolationGroups =
+    groupSemanticIdentityViolations(identityAssessments);
 
-  for (const assessment of identityAssessments) {
-    if (assessment.status !== "violated") continue;
-
-    const materialityRank = assessment.materiality?.rank;
+  for (const group of identityViolationGroups) {
+    const materialityRank = group.worstMateriality?.rank;
     const severity: Severity =
       materialityRank && materialityRank !== "unknown"
         ? materialityRank
-        : assessment.confidence >= 0.85
+        : group.confidence >= 0.85
           ? "high"
           : "medium";
 
@@ -562,22 +565,31 @@ export function analyzeWorkbook(
       id: id("finding"),
       severity,
       code: "SEMANTIC_IDENTITY_VIOLATION",
-      title: "Financial identity conflicts with formula semantics",
-      sheet: assessment.sheet,
-      cell: assessment.cell,
+      title: "Financial identity defect repeated across model periods",
+      sheet: group.sheet,
+      cell: group.affectedRange,
       details:
-        assessment.explanation +
+        group.explanation +
         " Expected identity: " +
-        assessment.canonicalExpression +
-        ".",
+        group.canonicalExpression +
+        ". Affected cells: " +
+        group.affectedRange +
+        " (" +
+        group.affectedCount +
+        " period" +
+        (group.affectedCount === 1 ? "" : "s") +
+        ").",
       evidence: {
-        identityAssessmentId: assessment.id,
-        identityName: assessment.identityName,
-        semanticExpression: assessment.semanticExpression,
-        observedRoles: assessment.observedRoles,
-        hypotheses: assessment.hypotheses,
-        rootCauseCandidates: assessment.rootCauseCandidates,
-        materiality: assessment.materiality
+        identityViolationGroupId: group.id,
+        identityAssessmentIds: group.assessmentIds,
+        identityName: group.identityName,
+        semanticExpression: group.semanticExpression,
+        affectedCells: group.affectedCells,
+        affectedRange: group.affectedRange,
+        affectedCount: group.affectedCount,
+        hypotheses: group.hypotheses,
+        rootCauseCandidates: group.rootCauseCandidates,
+        materiality: group.worstMateriality
       }
     });
   }
@@ -701,6 +713,7 @@ export function analyzeWorkbook(
       semanticNodes: semanticNodes.length,
       identityChecks: identityAssessments.length,
       identityViolations,
+      identityViolationGroups: identityViolationGroups.length,
       counterfactualTests: counterfactualTests.length,
       testsPassed,
       testsFailed,
@@ -709,6 +722,7 @@ export function analyzeWorkbook(
     findings,
     semanticNodes,
     identityAssessments,
+    identityViolationGroups,
     counterfactualTests
   };
 }
