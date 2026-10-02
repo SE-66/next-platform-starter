@@ -1,4 +1,10 @@
 import * as XLSX from "xlsx";
+import {
+  buildForwardDependencyGraph,
+  inferSemanticNodes,
+  synthesizeCounterfactualTests,
+  type SemanticCell
+} from "./semantics";
 import type { AnalysisResult, Finding, Severity } from "./types";
 
 const ERROR_VALUES = new Set([
@@ -11,15 +17,7 @@ const ERROR_VALUES = new Set([
   "#NULL!"
 ]);
 
-interface CellNode {
-  key: string;
-  sheet: string;
-  address: string;
-  row: number;
-  col: number;
-  formula?: string;
-  value?: unknown;
-}
+interface CellNode extends SemanticCell {}
 
 function id(prefix: string): string {
   return `${prefix}_${crypto.randomUUID()}`;
@@ -38,14 +36,88 @@ function normalizeFormula(formula: string): string {
     .replace(/\s+/g, "");
 }
 
-function extractRefs(formula: string, currentSheet: string): string[] {
-  const refs: string[] = [];
-  const re = /(?:(?:'([^']+)'|([A-Za-z0-9_ .-]+))!)?\$?([A-Z]{1,3})\$?(\d+)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(formula)) !== null) {
-    const sheet = (m[1] || m[2] || currentSheet).trim();
-    refs.push(`${sheet}!${m[3]}${m[4]}`);
+function normalizeSheetName(sheet: string): string {
+  return sheet.replace(/^'/, "").replace(/'$/, "").replace(/''/g, "'");
+}
+
+function expandRange(
+  sheet: string,
+  startCol: string,
+  startRow: number,
+  endCol: string,
+  endRow: number,
+  maxCells = 250
+): string[] {
+  const start = XLSX.utils.decode_cell(`${startCol}${startRow}`);
+  const end = XLSX.utils.decode_cell(`${endCol}${endRow}`);
+  const rowCount = Math.abs(end.r - start.r) + 1;
+  const colCount = Math.abs(end.c - start.c) + 1;
+
+  if (rowCount * colCount > maxCells) {
+    return [
+      `${sheet}!${startCol}${startRow}`,
+      `${sheet}!${endCol}${endRow}`
+    ];
   }
+
+  const refs: string[] = [];
+  const r0 = Math.min(start.r, end.r);
+  const r1 = Math.max(start.r, end.r);
+  const c0 = Math.min(start.c, end.c);
+  const c1 = Math.max(start.c, end.c);
+
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      refs.push(`${sheet}!${XLSX.utils.encode_cell({ r, c })}`);
+    }
+  }
+  return refs;
+}
+
+export function extractRefs(formula: string, currentSheet: string): string[] {
+  const refs: string[] = [];
+  const protectedRanges: Array<{ start: number; end: number }> = [];
+
+  const rangeRe =
+    /(?:(?:'([^']+(?:''[^']+)*)'|([A-Za-z0-9_ .-]+))!)?\$?([A-Z]{1,3})\$?(\d+)\s*:\s*\$?([A-Z]{1,3})\$?(\d+)/g;
+
+  let rangeMatch: RegExpExecArray | null;
+  while ((rangeMatch = rangeRe.exec(formula)) !== null) {
+    const sheet = normalizeSheetName(
+      rangeMatch[1] || rangeMatch[2] || currentSheet
+    ).trim();
+
+    refs.push(
+      ...expandRange(
+        sheet,
+        rangeMatch[3],
+        Number(rangeMatch[4]),
+        rangeMatch[5],
+        Number(rangeMatch[6])
+      )
+    );
+    protectedRanges.push({
+      start: rangeMatch.index,
+      end: rangeMatch.index + rangeMatch[0].length
+    });
+  }
+
+  const cellRe =
+    /(?:(?:'([^']+(?:''[^']+)*)'|([A-Za-z0-9_ .-]+))!)?\$?([A-Z]{1,3})\$?(\d+)/g;
+
+  let cellMatch: RegExpExecArray | null;
+  while ((cellMatch = cellRe.exec(formula)) !== null) {
+    const insideRange = protectedRanges.some(
+      span => cellMatch!.index >= span.start && cellMatch!.index < span.end
+    );
+    if (insideRange) continue;
+
+    const sheet = normalizeSheetName(
+      cellMatch[1] || cellMatch[2] || currentSheet
+    ).trim();
+    refs.push(`${sheet}!${cellMatch[3]}${cellMatch[4]}`);
+  }
+
   return [...new Set(refs)];
 }
 
@@ -86,6 +158,7 @@ function detectCycles(nodes: CellNode[]): Finding[] {
       return;
     }
     if (s === 2) return;
+
     state.set(key, 1);
     stack.push(key);
     for (const next of graph.get(key) || []) visit(next);
@@ -102,9 +175,9 @@ function detectFormulaOutliers(nodes: CellNode[]): Finding[] {
   const bySheetRow = new Map<string, CellNode[]>();
 
   for (const n of nodes) {
-    const k = `${n.sheet}:${n.row}`;
-    if (!bySheetRow.has(k)) bySheetRow.set(k, []);
-    bySheetRow.get(k)!.push(n);
+    const key = `${n.sheet}:${n.row}`;
+    if (!bySheetRow.has(key)) bySheetRow.set(key, []);
+    bySheetRow.get(key)!.push(n);
   }
 
   for (const cells of bySheetRow.values()) {
@@ -113,17 +186,18 @@ function detectFormulaOutliers(nodes: CellNode[]): Finding[] {
 
     const counts = new Map<string, number>();
     for (const c of formulas) {
-      const p = normalizeFormula(c.formula!);
-      counts.set(p, (counts.get(p) || 0) + 1);
+      const pattern = normalizeFormula(c.formula!);
+      counts.set(pattern, (counts.get(pattern) || 0) + 1);
     }
+
     const [modalPattern, modalCount] =
       [...counts.entries()].sort((a, b) => b[1] - a[1])[0] || [];
 
     if (!modalPattern || modalCount < 3) continue;
 
     for (const c of formulas) {
-      const p = normalizeFormula(c.formula!);
-      if (p !== modalPattern && (counts.get(p) || 0) === 1) {
+      const pattern = normalizeFormula(c.formula!);
+      if (pattern !== modalPattern && (counts.get(pattern) || 0) === 1) {
         findings.push({
           id: id("finding"),
           severity: "medium",
@@ -138,6 +212,7 @@ function detectFormulaOutliers(nodes: CellNode[]): Finding[] {
       }
     }
   }
+
   return findings;
 }
 
@@ -146,9 +221,9 @@ function detectHardcodes(nodes: CellNode[]): Finding[] {
   const bySheetRow = new Map<string, CellNode[]>();
 
   for (const n of nodes) {
-    const k = `${n.sheet}:${n.row}`;
-    if (!bySheetRow.has(k)) bySheetRow.set(k, []);
-    bySheetRow.get(k)!.push(n);
+    const key = `${n.sheet}:${n.row}`;
+    if (!bySheetRow.has(key)) bySheetRow.set(key, []);
+    bySheetRow.get(key)!.push(n);
   }
 
   for (const cells of bySheetRow.values()) {
@@ -172,6 +247,7 @@ function detectHardcodes(nodes: CellNode[]): Finding[] {
       }
     }
   }
+
   return findings;
 }
 
@@ -180,27 +256,30 @@ function findLabelValue(
   labels: RegExp[]
 ): { address: string; value: number } | undefined {
   const range = XLSX.utils.decode_range(sheet["!ref"] || "A1:A1");
+
   for (let r = range.s.r; r <= range.e.r; r++) {
     for (let c = range.s.c; c <= range.e.c; c++) {
-      const addr = XLSX.utils.encode_cell({ r, c });
-      const cell = sheet[addr];
+      const address = XLSX.utils.encode_cell({ r, c });
+      const cell = sheet[address];
       if (!cell || typeof cell.v !== "string") continue;
+
       const text = cell.v.trim();
       if (!labels.some(re => re.test(text))) continue;
 
       for (let offset = 1; offset <= 8; offset++) {
-        const vAddr = XLSX.utils.encode_cell({ r, c: c + offset });
-        const v = sheet[vAddr]?.v;
-        if (typeof v === "number") return { address: vAddr, value: v };
+        const valueAddress = XLSX.utils.encode_cell({ r, c: c + offset });
+        const value = sheet[valueAddress]?.v;
+        if (typeof value === "number") {
+          return { address: valueAddress, value };
+        }
       }
     }
   }
+
   return undefined;
 }
 
-function detectBalanceSheetMismatch(
-  workbook: XLSX.WorkBook
-): Finding[] {
+function detectBalanceSheetMismatch(workbook: XLSX.WorkBook): Finding[] {
   const findings: Finding[] = [];
 
   for (const sheetName of workbook.SheetNames) {
@@ -214,9 +293,10 @@ function detectBalanceSheetMismatch(
 
     if (!assets || !liabilities || !equity) continue;
 
-    const diff = assets.value - (liabilities.value + equity.value);
+    const difference = assets.value - (liabilities.value + equity.value);
     const scale = Math.max(1, Math.abs(assets.value));
-    if (Math.abs(diff) / scale > 0.0001) {
+
+    if (Math.abs(difference) / scale > 0.0001) {
       findings.push({
         id: id("finding"),
         severity: "high",
@@ -229,13 +309,25 @@ function detectBalanceSheetMismatch(
           assets,
           liabilities,
           equity,
-          difference: diff
+          difference
         }
       });
     }
   }
 
   return findings;
+}
+
+function errorDisplayValue(cell: XLSX.CellObject): string | undefined {
+  if (typeof cell.v === "string" && ERROR_VALUES.has(cell.v.toUpperCase())) {
+    return cell.v.toUpperCase();
+  }
+
+  if (cell.t === "e" && typeof cell.w === "string") {
+    return cell.w;
+  }
+
+  return undefined;
 }
 
 export function analyzeWorkbook(
@@ -245,7 +337,7 @@ export function analyzeWorkbook(
   const workbook = XLSX.read(bytes, {
     type: "array",
     cellFormula: true,
-    cellText: false
+    cellText: true
   });
 
   const nodes: CellNode[] = [];
@@ -257,6 +349,7 @@ export function analyzeWorkbook(
     const sheet = workbook.Sheets[sheetName];
     const ref = sheet["!ref"];
     if (!ref) continue;
+
     const range = XLSX.utils.decode_range(ref);
 
     for (let r = range.s.r; r <= range.e.r; r++) {
@@ -264,10 +357,12 @@ export function analyzeWorkbook(
         const address = XLSX.utils.encode_cell({ r, c });
         const cell = sheet[address];
         if (!cell) continue;
+
         populatedCells++;
 
         const formula =
           typeof cell.f === "string" && cell.f.length ? cell.f : undefined;
+
         if (formula) formulaCells++;
 
         const node: CellNode = {
@@ -279,21 +374,20 @@ export function analyzeWorkbook(
           formula,
           value: cell.v
         };
+
         nodes.push(node);
 
-        if (
-          typeof cell.v === "string" &&
-          ERROR_VALUES.has(cell.v.toUpperCase())
-        ) {
+        const excelError = errorDisplayValue(cell);
+        if (excelError) {
           findings.push({
             id: id("finding"),
             severity: "critical",
             code: "EXCEL_ERROR",
-            title: `Excel error value ${cell.v}`,
+            title: `Excel error value ${excelError}`,
             sheet: sheetName,
             cell: address,
             details: "The workbook contains an explicit Excel error value.",
-            evidence: { value: cell.v, formula }
+            evidence: { value: excelError, formula }
           });
         }
       }
@@ -309,6 +403,13 @@ export function analyzeWorkbook(
 
   findings.sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
 
+  const semanticNodes = inferSemanticNodes(nodes);
+  const dependencyGraph = buildForwardDependencyGraph(nodes, extractRefs);
+  const counterfactualTests = synthesizeCounterfactualTests(
+    semanticNodes,
+    dependencyGraph
+  );
+
   return {
     runId: id("run"),
     fileName,
@@ -317,8 +418,12 @@ export function analyzeWorkbook(
       sheets: workbook.SheetNames.length,
       populatedCells,
       formulaCells,
-      findings: findings.length
+      findings: findings.length,
+      semanticNodes: semanticNodes.length,
+      counterfactualTests: counterfactualTests.length
     },
-    findings
+    findings,
+    semanticNodes,
+    counterfactualTests
   };
 }
