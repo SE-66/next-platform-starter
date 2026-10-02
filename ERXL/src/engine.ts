@@ -10,6 +10,10 @@ import {
   analyzeSemanticIdentities,
   groupSemanticIdentityViolations
 } from "./semantic-identities";
+import {
+  generateAutomaticHypotheses,
+  runAutomaticHypothesisExperiments
+} from "./automatic-hypotheses";
 import type { AnalysisResult, Finding, Severity } from "./types";
 
 const ERROR_VALUES = new Set([
@@ -594,6 +598,141 @@ export function analyzeWorkbook(
     });
   }
 
+  const generatedHypotheses = generateAutomaticHypotheses(
+    workbook,
+    semanticNodes
+  );
+  const hypothesisExperiments = runAutomaticHypothesisExperiments(
+    workbook,
+    semanticNodes,
+    generatedHypotheses
+  );
+
+  const hypothesisById = new Map(
+    generatedHypotheses.map(hypothesis => [hypothesis.id, hypothesis])
+  );
+  const mismatchBuckets = new Map<
+    string,
+    typeof hypothesisExperiments
+  >();
+
+  for (const experiment of hypothesisExperiments) {
+    if (!experiment.mismatch) continue;
+
+    const preferred = hypothesisById.get(experiment.preferredHypothesisId);
+    const implemented = experiment.implementedHypothesisId
+      ? hypothesisById.get(experiment.implementedHypothesisId)
+      : undefined;
+
+    const key = [
+      experiment.sheet,
+      experiment.targetRole,
+      preferred?.semanticExpression || experiment.preferredExpression,
+      implemented?.semanticExpression || experiment.implementedExpression || ""
+    ].join("|");
+
+    if (!mismatchBuckets.has(key)) mismatchBuckets.set(key, []);
+    mismatchBuckets.get(key)!.push(experiment);
+  }
+
+  for (const bucket of mismatchBuckets.values()) {
+    const sorted = [...bucket].sort((a, b) => {
+      const left = XLSX.utils.decode_cell(a.cell);
+      const right = XLSX.utils.decode_cell(b.cell);
+      return left.r - right.r || left.c - right.c;
+    });
+
+    const first = sorted[0];
+    const preferred = hypothesisById.get(first.preferredHypothesisId);
+    const implemented = first.implementedHypothesisId
+      ? hypothesisById.get(first.implementedHypothesisId)
+      : undefined;
+
+    const cells = sorted.map(item => item.cell);
+    const decoded = cells.map(cell => ({
+      cell,
+      pos: XLSX.utils.decode_cell(cell)
+    }));
+    const sameRow = decoded.every(item => item.pos.r === decoded[0].pos.r);
+    const sameCol = decoded.every(item => item.pos.c === decoded[0].pos.c);
+    const ordered = decoded.sort(
+      (a, b) => a.pos.r - b.pos.r || a.pos.c - b.pos.c
+    );
+    const contiguous =
+      ordered.length > 1 &&
+      (sameRow || sameCol) &&
+      ordered.every((item, index) => {
+        if (index === 0) return true;
+        const previous = ordered[index - 1].pos;
+        return sameRow
+          ? item.pos.c === previous.c + 1
+          : item.pos.r === previous.r + 1;
+      });
+    const affectedRange = contiguous
+      ? ordered[0].cell + ":" + ordered[ordered.length - 1].cell
+      : ordered.map(item => item.cell).join(", ");
+
+    const worstMateriality = sorted
+      .map(item => item.materiality)
+      .filter(
+        (
+          item
+        ): item is NonNullable<
+          (typeof hypothesisExperiments)[number]["materiality"]
+        > => Boolean(item)
+      )
+      .sort(
+        (a, b) =>
+          (b.relativeImpact || 0) - (a.relativeImpact || 0)
+      )[0];
+
+    const severity: Severity =
+      worstMateriality?.rank && worstMateriality.rank !== "unknown"
+        ? worstMateriality.rank
+        : "high";
+
+    findings.push({
+      id: id("finding"),
+      severity,
+      code: "AUTOMATIC_HYPOTHESIS_MISMATCH",
+      title: "Generated financial hypothesis conflicts with implemented behavior",
+      sheet: first.sheet,
+      cell: affectedRange,
+      details:
+        "ERXL generated competing formulas from the workbook's semantic roles and dimensional grammar, then used a discriminating perturbation to identify the formula behavior actually implemented. Preferred hypothesis: " +
+        (preferred?.expression || first.preferredExpression) +
+        ". Implemented behavior most closely matched: " +
+        (implemented?.expression || first.implementedExpression || "unknown") +
+        ". Affected cells: " +
+        affectedRange +
+        " (" +
+        sorted.length +
+        " period" +
+        (sorted.length === 1 ? "" : "s") +
+        ").",
+      evidence: {
+        experimentIds: sorted.map(item => item.id),
+        preferredHypothesis: preferred || null,
+        implementedHypothesis: implemented || null,
+        affectedCells: cells,
+        affectedRange,
+        affectedCount: sorted.length,
+        perturbations: sorted.map(item => item.perturbation),
+        implementedMatchScores: sorted.map(
+          item => item.implementedMatchScore
+        ),
+        plausibilityGaps: sorted.map(item => item.plausibilityGap),
+        rootCauseCandidates: sorted.map(item => ({
+          cellKey: item.targetKey,
+          score: item.implementedMatchScore || 0,
+          reason:
+            "This target formula reproduced the lower-plausibility generated hypothesis under a discriminating perturbation."
+        })),
+        materiality: worstMateriality
+      }
+    });
+  }
+
   const dependencyGraph = buildForwardDependencyGraph(nodes, extractRefs);
   const generatedTests = synthesizeCounterfactualTests(
     semanticNodes,
@@ -691,6 +830,10 @@ export function analyzeWorkbook(
     assessment => assessment.status === "violated"
   ).length;
 
+  const hypothesisMismatches = hypothesisExperiments.filter(
+    experiment => experiment.mismatch
+  ).length;
+
   const testsPassed = counterfactualTests.filter(
     test => test.executionStatus === "passed"
   ).length;
@@ -714,6 +857,9 @@ export function analyzeWorkbook(
       identityChecks: identityAssessments.length,
       identityViolations,
       identityViolationGroups: identityViolationGroups.length,
+      generatedHypotheses: generatedHypotheses.length,
+      hypothesisExperiments: hypothesisExperiments.length,
+      hypothesisMismatches,
       counterfactualTests: counterfactualTests.length,
       testsPassed,
       testsFailed,
@@ -723,6 +869,8 @@ export function analyzeWorkbook(
     semanticNodes,
     identityAssessments,
     identityViolationGroups,
+    generatedHypotheses,
+    hypothesisExperiments,
     counterfactualTests
   };
 }
