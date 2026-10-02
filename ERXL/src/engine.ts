@@ -5,6 +5,7 @@ import {
   synthesizeCounterfactualTests,
   type SemanticCell
 } from "./semantics";
+import { executeCounterfactualTests } from "./counterfactual-executor";
 import type { AnalysisResult, Finding, Severity } from "./types";
 
 const ERROR_VALUES = new Set([
@@ -474,13 +475,54 @@ export function analyzeWorkbook(
   const semanticNodes = inferSemanticNodes(nodes);
   findings.push(...detectSemanticDependencyOutliers(semanticNodes));
 
-  findings.sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
-
   const dependencyGraph = buildForwardDependencyGraph(nodes, extractRefs);
-  const counterfactualTests = synthesizeCounterfactualTests(
+  const generatedTests = synthesizeCounterfactualTests(
     semanticNodes,
     dependencyGraph
   );
+  const counterfactualTests = executeCounterfactualTests(
+    workbook,
+    generatedTests
+  );
+
+  for (const test of counterfactualTests) {
+    if (test.executionStatus !== "failed") continue;
+
+    findings.push({
+      id: id("finding"),
+      severity: "high",
+      code: "COUNTERFACTUAL_TEST_FAILURE",
+      title: "Counterfactual financial behavior violated",
+      sheet: test.output.sheet,
+      cell: test.output.cell,
+      details:
+        "Changing " +
+        test.input.role +
+        " at " +
+        test.input.sheet +
+        "!" +
+        test.input.cell +
+        " produced a " +
+        test.observedDirection +
+        " in " +
+        test.output.role +
+        ", while ERXL expected " +
+        test.output.expectedDirection +
+        ".",
+      evidence: {
+        testId: test.id,
+        input: test.input,
+        output: test.output,
+        baselineOutput: test.baselineOutput,
+        perturbedInput: test.perturbedInput,
+        perturbedOutput: test.perturbedOutput,
+        observedDirection: test.observedDirection,
+        dependencyPath: test.dependencyPath
+      }
+    });
+  }
+
+  findings.sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
 
   return {
     runId: id("run"),
