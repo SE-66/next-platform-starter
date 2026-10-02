@@ -302,6 +302,115 @@ function expressionFor(
   }
 }
 
+const RATIO_BASE_SCORE: Partial<Record<SemanticRole, number>> = {
+  revenue: 1,
+  assets: 0.82,
+  debt: 0.72,
+  enterprise_value: 0.7,
+  equity_value: 0.66,
+  liabilities: 0.62,
+  gross_profit: 0.5,
+  cogs: 0.5,
+  ebitda: 0.45,
+  working_capital: 0.42,
+  cash: 0.38,
+  sga: 0.35,
+  capex: 0.32,
+  interest_expense: 0.3,
+  taxes: 0.3
+};
+
+function roleTokens(role: SemanticRole): string[] {
+  const generic = new Set([
+    "margin",
+    "rate",
+    "value",
+    "expense",
+    "total",
+    "net",
+    "ending",
+    "closing"
+  ]);
+
+  return role
+    .split("_")
+    .filter(token => token && !generic.has(token));
+}
+
+function orderedRoleOverlap(
+  target: SemanticRole,
+  source: SemanticRole
+): number {
+  const targetTokens = new Set(roleTokens(target));
+  const sourceTokens = roleTokens(source);
+
+  if (!targetTokens.size || !sourceTokens.length) return 0;
+
+  const overlap = sourceTokens.filter(token => targetTokens.has(token)).length;
+  return overlap / Math.max(targetTokens.size, sourceTokens.length);
+}
+
+function ratioOrientationAdjustment(
+  target: SemanticNode,
+  operator: HypothesisOperator,
+  sources: SemanticNode[]
+): number {
+  if (operator !== "divide" || sources.length !== 2) return 0;
+
+  const [numerator, denominator] = sources;
+  if (
+    dimension(target.role) !== "rate" ||
+    dimension(numerator.role) !== "money" ||
+    dimension(denominator.role) !== "money"
+  ) {
+    return 0;
+  }
+
+  // For named financial ratios, the numerator usually carries the semantic
+  // concept named by the target (EBITDA margin -> EBITDA; gross margin ->
+  // gross profit), while the denominator is typically the broader scale base.
+  // This is generic ordered-role scoring, not an exact formula lookup.
+  const numeratorAlignment = orderedRoleOverlap(
+    target.role,
+    numerator.role
+  );
+  const denominatorAlignment = orderedRoleOverlap(
+    target.role,
+    denominator.role
+  );
+
+  const numeratorBase = RATIO_BASE_SCORE[numerator.role] ?? 0.4;
+  const denominatorBase = RATIO_BASE_SCORE[denominator.role] ?? 0.4;
+
+  return (
+    0.08 * (numeratorAlignment - denominatorAlignment) +
+    0.05 * (denominatorBase - numeratorBase)
+  );
+}
+
+function ratioScaleAdjustment(
+  target: SemanticNode,
+  operator: HypothesisOperator,
+  baselinePrediction: number
+): number {
+  if (
+    operator !== "divide" ||
+    dimension(target.role) !== "rate" ||
+    !Number.isFinite(baselinePrediction)
+  ) {
+    return 0;
+  }
+
+  const magnitude = Math.abs(baselinePrediction);
+
+  // Financial rates/margins are commonly represented as decimal fractions.
+  // This is intentionally soft: extreme but valid rates are not rejected.
+  if (magnitude <= 1.5) return 0.025;
+  if (magnitude > 5) return -0.08;
+  if (magnitude > 2) return -0.035;
+  return 0;
+}
+
 function operatorBonus(
   target: SemanticRole,
   operator: HypothesisOperator,
@@ -388,7 +497,8 @@ function hypothesisScore(
         0.45 * semanticAffinityScore +
         0.12 * simplicityScore +
         0.05 * sameSheetScore +
-        operatorBonus(target.role, operator, sources)
+        operatorBonus(target.role, operator, sources) +
+        ratioOrientationAdjustment(target, operator, sources)
     )
   );
 
@@ -487,7 +597,24 @@ function makeCandidate(
     );
 
     if (!Number.isFinite(baselinePrediction)) return undefined;
+
     candidate.baselinePrediction = baselinePrediction;
+    candidate.plausibilityScore = Number(
+      Math.max(
+        0,
+        Math.min(
+          0.99,
+          candidate.plausibilityScore +
+            ratioScaleAdjustment(target, operator, baselinePrediction)
+        )
+      ).toFixed(2)
+    );
+
+    if (operator === "divide" && dimension(target.role) === "rate") {
+      candidate.generationBasis +=
+        " Ordered ratio orientation and scale sanity were included in ranking.";
+    }
+
     return candidate;
   } catch {
     return undefined;
