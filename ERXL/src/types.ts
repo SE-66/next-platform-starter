@@ -4,6 +4,8 @@ export type SemanticRole =
   | "revenue"
   | "units"
   | "price"
+  | "cogs"
+  | "sga"
   | "gross_profit"
   | "gross_margin"
   | "ebitda"
@@ -24,6 +26,20 @@ export type SemanticRole =
   | "taxes"
   | "unknown";
 
+export interface RootCauseCandidate {
+  cellKey: string;
+  score: number;
+  reason: string;
+}
+
+export interface MaterialityEstimate {
+  actual?: number;
+  expected?: number;
+  absoluteImpact?: number;
+  relativeImpact?: number;
+  rank: "critical" | "high" | "medium" | "low" | "unknown";
+}
+
 export interface Finding {
   id: string;
   severity: Severity;
@@ -34,6 +50,7 @@ export interface Finding {
     | "CIRCULAR_REFERENCE"
     | "BALANCE_SHEET_MISMATCH"
     | "SEMANTIC_DEPENDENCY_OUTLIER"
+    | "SEMANTIC_IDENTITY_VIOLATION"
     | "COUNTERFACTUAL_TEST_FAILURE";
   title: string;
   sheet?: string;
@@ -52,6 +69,33 @@ export interface SemanticNode {
   confidence: number;
   value?: number | string | boolean | null;
   formula?: string;
+}
+
+export interface IdentityHypothesisScore {
+  name: string;
+  canonical: boolean;
+  requiredRoles: SemanticRole[];
+  score: number;
+  matched: boolean;
+}
+
+export interface SemanticIdentityAssessment {
+  id: string;
+  targetNodeId: string;
+  targetKey: string;
+  targetRole: SemanticRole;
+  sheet: string;
+  cell: string;
+  identityName: string;
+  canonicalExpression: string;
+  semanticExpression: string;
+  observedRoles: SemanticRole[];
+  status: "confirmed" | "violated" | "ambiguous";
+  confidence: number;
+  hypotheses: IdentityHypothesisScore[];
+  explanation: string;
+  rootCauseCandidates: RootCauseCandidate[];
+  materiality?: MaterialityEstimate;
 }
 
 export type ExpectedDirection =
@@ -87,6 +131,9 @@ export interface CounterfactualTest {
   perturbedOutput?: number;
   observedDirection?: "increase" | "decrease" | "unchanged";
   executionError?: string;
+  absoluteImpact?: number;
+  relativeImpact?: number;
+  materialityRank?: "critical" | "high" | "medium" | "low";
 }
 
 export interface WorkbookSummary {
@@ -95,6 +142,8 @@ export interface WorkbookSummary {
   formulaCells: number;
   findings: number;
   semanticNodes: number;
+  identityChecks: number;
+  identityViolations: number;
   counterfactualTests: number;
   testsPassed: number;
   testsFailed: number;
@@ -108,5 +157,6 @@ export interface AnalysisResult {
   summary: WorkbookSummary;
   findings: Finding[];
   semanticNodes: SemanticNode[];
+  identityAssessments: SemanticIdentityAssessment[];
   counterfactualTests: CounterfactualTest[];
 }
