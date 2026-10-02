@@ -29,7 +29,7 @@ const ROLE_PATTERNS: Array<{
   patterns: RegExp[];
   confidence: number;
 }> = [
-  { role: "interest_rate", confidence: 0.98, patterns: [/\binterest rate\b/i, /\bcoupon rate\b/i, /\bbase rate\b/i, /\bsofr\b/i, /\beuribor\b/i] },
+  { role: "interest_rate", confidence: 0.98, patterns: [/\binterest rate\b/i, /\bcoupon rate\b/i, /\bbase rate\b/i, /\bsofr\b/i, /\beuribor\b/i, /\bdebt spread\b/i, /\bcredit spread\b/i, /\bloan spread\b/i] },
   { role: "interest_expense", confidence: 0.98, patterns: [/\binterest expense\b/i, /\bfinance cost/i, /\binterest cost/i] },
   { role: "exit_multiple", confidence: 0.98, patterns: [/\bexit multiple\b/i, /\bexit ebitda multiple\b/i, /\bterminal multiple\b/i] },
   { role: "enterprise_value", confidence: 0.96, patterns: [/\benterprise value\b/i, /^ev$/i] },
