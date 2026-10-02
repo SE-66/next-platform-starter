@@ -2,7 +2,8 @@ import type {
   AnalysisResult,
   CounterfactualTest,
   SemanticIdentityAssessment,
-  SemanticNode
+  SemanticNode,
+  SemanticViolationGroup
 } from "./types";
 
 export interface SupabaseEnv {
@@ -112,6 +113,31 @@ function identityRows(
   }));
 }
 
+
+function violationGroupRows(
+  runId: string,
+  groups: SemanticViolationGroup[]
+) {
+  return groups.map(group => ({
+    id: group.id,
+    analysis_run_id: runId,
+    identity_name: group.identityName,
+    target_role: group.targetRole,
+    sheet_name: group.sheet,
+    affected_cells: group.affectedCells,
+    affected_range: group.affectedRange,
+    affected_count: group.affectedCount,
+    canonical_expression: group.canonicalExpression,
+    semantic_expression: group.semanticExpression,
+    explanation: group.explanation,
+    confidence: group.confidence,
+    hypotheses: group.hypotheses,
+    assessment_ids: group.assessmentIds,
+    root_cause_candidates: group.rootCauseCandidates,
+    worst_materiality: group.worstMateriality ?? null
+  }));
+}
+
 export async function persistAnalysis(
   env: SupabaseEnv,
   result: AnalysisResult
@@ -129,6 +155,7 @@ export async function persistAnalysis(
     semantic_node_count: result.summary.semanticNodes,
     identity_check_count: result.summary.identityChecks,
     identity_violation_count: result.summary.identityViolations,
+    identity_violation_group_count: result.summary.identityViolationGroups,
     counterfactual_test_count: result.summary.counterfactualTests,
     tests_passed: result.summary.testsPassed,
     tests_failed: result.summary.testsFailed,
@@ -162,6 +189,14 @@ export async function persistAnalysis(
       env,
       "identity_assessments",
       identityRows(result.runId, result.identityAssessments)
+    );
+  }
+
+  if (result.identityViolationGroups.length) {
+    await post(
+      env,
+      "identity_violation_groups",
+      violationGroupRows(result.runId, result.identityViolationGroups)
     );
   }
 
