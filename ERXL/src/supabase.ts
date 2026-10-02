@@ -1,6 +1,8 @@
 import type {
   AnalysisResult,
   CounterfactualTest,
+  GeneratedHypothesis,
+  HypothesisExperiment,
   SemanticIdentityAssessment,
   SemanticNode,
   SemanticViolationGroup
@@ -138,6 +140,64 @@ function violationGroupRows(
   }));
 }
 
+
+function hypothesisRows(
+  runId: string,
+  hypotheses: GeneratedHypothesis[]
+) {
+  return hypotheses.map(hypothesis => ({
+    id: hypothesis.id,
+    analysis_run_id: runId,
+    target_semantic_node_id: hypothesis.targetNodeId,
+    target_key: hypothesis.targetKey,
+    target_role: hypothesis.targetRole,
+    sheet_name: hypothesis.sheet,
+    cell_address: hypothesis.cell,
+    operator: hypothesis.operator,
+    expression: hypothesis.expression,
+    semantic_expression: hypothesis.semanticExpression,
+    source_node_ids: hypothesis.sourceNodeIds,
+    source_keys: hypothesis.sourceKeys,
+    source_roles: hypothesis.sourceRoles,
+    dimensional_score: hypothesis.dimensionalScore,
+    semantic_affinity_score: hypothesis.semanticAffinityScore,
+    simplicity_score: hypothesis.simplicityScore,
+    plausibility_score: hypothesis.plausibilityScore,
+    baseline_prediction: hypothesis.baselinePrediction ?? null,
+    generation_basis: hypothesis.generationBasis
+  }));
+}
+
+function hypothesisExperimentRows(
+  runId: string,
+  experiments: HypothesisExperiment[]
+) {
+  return experiments.map(experiment => ({
+    id: experiment.id,
+    analysis_run_id: runId,
+    target_semantic_node_id: experiment.targetNodeId,
+    target_key: experiment.targetKey,
+    target_role: experiment.targetRole,
+    sheet_name: experiment.sheet,
+    cell_address: experiment.cell,
+    candidate_ids: experiment.candidateIds,
+    preferred_hypothesis_id: experiment.preferredHypothesisId,
+    implemented_hypothesis_id: experiment.implementedHypothesisId ?? null,
+    preferred_expression: experiment.preferredExpression,
+    implemented_expression: experiment.implementedExpression ?? null,
+    perturbation: experiment.perturbation ?? null,
+    baseline_target: experiment.baselineTarget ?? null,
+    observed_target: experiment.observedTarget ?? null,
+    predictions: experiment.predictions,
+    status: experiment.status,
+    mismatch: experiment.mismatch,
+    implemented_match_score: experiment.implementedMatchScore ?? null,
+    plausibility_gap: experiment.plausibilityGap ?? null,
+    explanation: experiment.explanation,
+    materiality: experiment.materiality ?? null
+  }));
+}
+
 export async function persistAnalysis(
   env: SupabaseEnv,
   result: AnalysisResult
@@ -156,6 +216,9 @@ export async function persistAnalysis(
     identity_check_count: result.summary.identityChecks,
     identity_violation_count: result.summary.identityViolations,
     identity_violation_group_count: result.summary.identityViolationGroups,
+    generated_hypothesis_count: result.summary.generatedHypotheses,
+    hypothesis_experiment_count: result.summary.hypothesisExperiments,
+    hypothesis_mismatch_count: result.summary.hypothesisMismatches,
     counterfactual_test_count: result.summary.counterfactualTests,
     tests_passed: result.summary.testsPassed,
     tests_failed: result.summary.testsFailed,
@@ -197,6 +260,22 @@ export async function persistAnalysis(
       env,
       "identity_violation_groups",
       violationGroupRows(result.runId, result.identityViolationGroups)
+    );
+  }
+
+  if (result.generatedHypotheses.length) {
+    await post(
+      env,
+      "generated_hypotheses",
+      hypothesisRows(result.runId, result.generatedHypotheses)
+    );
+  }
+
+  if (result.hypothesisExperiments.length) {
+    await post(
+      env,
+      "hypothesis_experiments",
+      hypothesisExperimentRows(result.runId, result.hypothesisExperiments)
     );
   }
 
