@@ -73,7 +73,12 @@ function testRows(runId: string, tests: CounterfactualTest[]) {
     dependency_path: test.dependencyPath,
     confidence: test.confidence,
     rationale: test.rationale,
-    execution_status: test.executionStatus
+    execution_status: test.executionStatus,
+    baseline_output: test.baselineOutput ?? null,
+    perturbed_input: test.perturbedInput ?? null,
+    perturbed_output: test.perturbedOutput ?? null,
+    observed_direction: test.observedDirection ?? null,
+    execution_error: test.executionError ?? null
   }));
 }
 
@@ -90,7 +95,12 @@ export async function persistAnalysis(
     sheet_count: result.summary.sheets,
     populated_cell_count: result.summary.populatedCells,
     formula_cell_count: result.summary.formulaCells,
-    finding_count: result.summary.findings
+    finding_count: result.summary.findings,
+    semantic_node_count: result.summary.semanticNodes,
+    counterfactual_test_count: result.summary.counterfactualTests,
+    tests_passed: result.summary.testsPassed,
+    tests_failed: result.summary.testsFailed,
+    tests_unsupported: result.summary.testsUnsupported
   });
 
   if (result.findings.length) {
