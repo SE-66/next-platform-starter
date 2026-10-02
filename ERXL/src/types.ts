@@ -32,7 +32,8 @@ export interface Finding {
     | "FORMULA_OUTLIER"
     | "HARDCODE_IN_FORMULA_REGION"
     | "CIRCULAR_REFERENCE"
-    | "BALANCE_SHEET_MISMATCH"\n    | "SEMANTIC_DEPENDENCY_OUTLIER";
+    | "BALANCE_SHEET_MISMATCH"
+    | "SEMANTIC_DEPENDENCY_OUTLIER";
   title: string;
   sheet?: string;
   cell?: string;
