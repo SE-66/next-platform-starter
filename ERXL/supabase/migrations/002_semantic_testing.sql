@@ -1,3 +1,10 @@
+alter table public.analysis_runs
+  add column if not exists semantic_node_count integer not null default 0,
+  add column if not exists counterfactual_test_count integer not null default 0,
+  add column if not exists tests_passed integer not null default 0,
+  add column if not exists tests_failed integer not null default 0,
+  add column if not exists tests_unsupported integer not null default 0;
+
 create table if not exists public.semantic_nodes (
   id text primary key,
   analysis_run_id text not null references public.analysis_runs(id) on delete cascade,
@@ -34,7 +41,13 @@ create table if not exists public.counterfactual_tests (
   confidence double precision not null,
   rationale text not null,
   execution_status text not null default 'generated'
-    check (execution_status in ('generated'))
+    check (execution_status in ('generated','passed','failed','unsupported')),
+  baseline_output double precision,
+  perturbed_input double precision,
+  perturbed_output double precision,
+  observed_direction text
+    check (observed_direction is null or observed_direction in ('increase','decrease','unchanged')),
+  execution_error text
 );
 
 create index if not exists semantic_nodes_run_idx
