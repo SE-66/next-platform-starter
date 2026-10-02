@@ -694,10 +694,10 @@ class FormulaParser {
       this.advance();
       const args: EvalValue[] = [];
 
-      if (this.current.type !== "rparen") {
+      if ((this.current as Token).type !== "rparen") {
         while (true) {
           args.push(this.parseComparison());
-          if (this.current.type !== "comma") break;
+          if ((this.current as Token).type !== "comma") break;
           this.advance();
         }
       }
