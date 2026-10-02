@@ -2,6 +2,36 @@
 
 ERXL is a financial-model error-finding, semantic-reasoning, and counterfactual-testing engine for Excel.
 
+## ERXL v0.4 — Automatic Hypothesis Generation
+
+v0.4 adds an experimental reasoning layer that does not require an exact hand-authored financial identity for every target.
+
+For each supported semantic target, ERXL now:
+
+1. gathers same-period semantic inputs from the workbook;
+2. generates dimensionally valid candidate expressions from a generic grammar such as:
+   - money ± money
+   - money × rate
+   - money × multiple
+   - units × price
+   - money ÷ money
+   - three-term money bridges
+   - average balance × rate
+   - average balance × additive or subtractive rate components;
+3. ranks candidates using dimensional validity, semantic-role affinity, simplicity, and workbook locality;
+4. preserves lower-plausibility candidates that match the workbook's observed formula structure;
+5. selects the smallest perturbation from 1%, 2%, 5%, and 10% that meaningfully separates competing candidate predictions;
+6. executes that perturbation against the actual workbook formula;
+7. determines which generated hypothesis best matches the observed response;
+8. reports a mismatch when the implemented behavior matches a materially lower-plausibility hypothesis;
+9. estimates materiality between the actual baseline result and the preferred generated hypothesis.
+
+This layer produces `AUTOMATIC_HYPOTHESIS_MISMATCH` findings independently of the existing hand-authored identity rules.
+
+A regression test demonstrates this on **Gross Margin**, which is not covered by the v0.3 identity rule table: ERXL generates `Gross Profit ÷ Revenue` and `COGS ÷ Revenue` as competing candidates, perturbs an input to distinguish them, observes that the workbook behaves like the lower-plausibility COGS-driven formula, and raises a mismatch.
+
+The generator is deterministic and bounded. It is not yet an unrestricted symbolic-discovery or LLM reasoning system.
+
 ## ERXL v0.3.1
 
 v0.3.1 improves semantic defect precision:
@@ -83,7 +113,10 @@ Cloudflare Worker
   +--> structural QA
   +--> semantic-role inference
   +--> dependency graph
-  +--> financial identity / hypothesis engine
+  +--> financial identity engine
+  +--> automatic hypothesis grammar + ranking
+  +--> minimum discriminating perturbation selector
+  +--> hypothesis behavior matcher
   +--> counterfactual test synthesis
   +--> deterministic formula evaluator
   +--> root-cause + materiality layer
@@ -94,6 +127,9 @@ Supabase
   +--> findings
   +--> semantic_nodes
   +--> identity_assessments
+  +--> identity_violation_groups
+  +--> generated_hypotheses
+  +--> hypothesis_experiments
   +--> counterfactual_tests
 ```
 
@@ -146,6 +182,7 @@ Migrations:
 002_semantic_testing.sql
 003_semantic_identity_reasoning.sql
 004_semantic_violation_groups.sql
+005_automatic_hypothesis_generation.sql
 ```
 
 All ERXL tables use RLS with no public browser policies. The Cloudflare Worker writes using the server-side Supabase secret.
@@ -164,7 +201,23 @@ Regression coverage includes:
 - cross-sheet formula parsing
 - a structurally consistent `Revenue × Exit Multiple` Enterprise Value bug
 - a structurally consistent interest-rate subtraction bug
+- automatically generated Enterprise Value hypotheses
+- automatically generated enterprise-to-equity bridge hypotheses
+- Gross Margin discovery beyond the hand-authored identity library
 
 ## Next research milestone
 
-The next patent-relevant step is **automatic hypothesis generation and minimum discriminating perturbation synthesis** rather than a hand-authored identity library. That should be prior-art searched before being treated as a filing candidate.
+The automatic-hypothesis / discriminating-perturbation mechanism now exists as a working bounded prototype. The next patent-strategy step is a focused prior-art kill search on this specific pipeline before treating it as a filing candidate:
+
+```text
+semantic role inference
+→ dimensionally valid hypothesis generation
+→ hypothesis plausibility ranking
+→ minimum discriminating perturbation selection
+→ deterministic workbook execution
+→ implemented-hypothesis identification
+→ preferred-vs-implemented mismatch
+→ root-cause and materiality output
+```
+
+The technical roadmap after that search is automatic grammar expansion, learned semantic affinities, multi-cell perturbations, and confidence calibration on independent real-world workbooks.
