@@ -28,13 +28,41 @@ function severityRank(s: Severity): number {
   return { critical: 4, high: 3, medium: 2, low: 1 }[s];
 }
 
-function normalizeFormula(formula: string): string {
-  return formula
-    .toUpperCase()
-    .replace(/'[^']+'!/g, "SHEET!")
-    .replace(/\$?[A-Z]{1,3}\$?\d+/g, "REF")
-    .replace(/\b\d+(?:\.\d+)?\b/g, "NUM")
-    .replace(/\s+/g, "");
+function normalizeFormula(formula: string, current: CellNode): string {
+  const refRe =
+    /(?:(?:'([^']+(?:''[^']+)*)'|([A-Za-z_][A-Za-z0-9_. -]*))!)?(\$?)([A-Z]{1,3})(\$?)(\d+)/g;
+
+  let output = "";
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  const normalizeText = (text: string) =>
+    text
+      .toUpperCase()
+      .replace(/\b\d+(?:\.\d+)?\b/g, "NUM")
+      .replace(/\s+/g, "");
+
+  while ((match = refRe.exec(formula)) !== null) {
+    output += normalizeText(formula.slice(cursor, match.index));
+
+    const sheet = normalizeSheetName(
+      match[1] || match[2] || current.sheet
+    ).trim();
+    const target = XLSX.utils.decode_cell(match[4] + match[6]);
+    const sheetToken = sheet === current.sheet ? "SELF" : "SHEET:" + sheet.toUpperCase();
+    const colToken = match[3]
+      ? "C$" + target.c
+      : "C" + (target.c - current.col);
+    const rowToken = match[5]
+      ? "R$" + target.r
+      : "R" + (target.r - current.row);
+
+    output += "[" + sheetToken + ":" + colToken + ":" + rowToken + "]";
+    cursor = match.index + match[0].length;
+  }
+
+  output += normalizeText(formula.slice(cursor));
+  return output;
 }
 
 function normalizeSheetName(sheet: string): string {
@@ -187,7 +215,7 @@ function detectFormulaOutliers(nodes: CellNode[]): Finding[] {
 
     const counts = new Map<string, number>();
     for (const c of formulas) {
-      const pattern = normalizeFormula(c.formula!);
+      const pattern = normalizeFormula(c.formula!, c);
       counts.set(pattern, (counts.get(pattern) || 0) + 1);
     }
 
@@ -197,7 +225,7 @@ function detectFormulaOutliers(nodes: CellNode[]): Finding[] {
     if (!modalPattern || modalCount < 3) continue;
 
     for (const c of formulas) {
-      const pattern = normalizeFormula(c.formula!);
+      const pattern = normalizeFormula(c.formula!, c);
       if (pattern !== modalPattern && (counts.get(pattern) || 0) === 1) {
         findings.push({
           id: id("finding"),
@@ -232,20 +260,32 @@ function detectHardcodes(nodes: CellNode[]): Finding[] {
     const formulaCount = populated.filter(c => c.formula).length;
     if (formulaCount < 4) continue;
 
+    const formulaColumns = populated
+      .filter(c => c.formula)
+      .map(c => c.col)
+      .sort((a, b) => a - b);
+
     for (const c of populated) {
-      if (!c.formula && typeof c.value === "number") {
-        findings.push({
-          id: id("finding"),
-          severity: "low",
-          code: "HARDCODE_IN_FORMULA_REGION",
-          title: "Numeric hardcode inside formula-dense row",
-          sheet: c.sheet,
-          cell: c.address,
-          details:
-            "A numeric constant appears inside a row where neighboring populated cells are mostly formulas. This may be intentional, but it deserves review.",
-          evidence: { value: c.value, formulaCount }
-        });
-      }
+      if (c.formula || typeof c.value !== "number") continue;
+
+      const hasFormulaLeft = formulaColumns.some(col => col < c.col);
+      const hasFormulaRight = formulaColumns.some(col => col > c.col);
+
+      // A base-year input at the left edge of a forecast row is normal.
+      // Flag only constants embedded inside a formula run.
+      if (!hasFormulaLeft || !hasFormulaRight) continue;
+
+      findings.push({
+        id: id("finding"),
+        severity: "medium",
+        code: "HARDCODE_IN_FORMULA_REGION",
+        title: "Numeric hardcode interrupts a formula sequence",
+        sheet: c.sheet,
+        cell: c.address,
+        details:
+          "A numeric constant appears between formula-driven periods in the same row. This is more suspicious than a normal historical/base-year input.",
+        evidence: { value: c.value, formulaCount }
+      });
     }
   }
 
