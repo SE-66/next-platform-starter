@@ -256,23 +256,24 @@ function findLabelValue(
   sheet: XLSX.WorkSheet,
   labels: RegExp[]
 ): { address: string; value: number } | undefined {
-  const range = XLSX.utils.decode_range(sheet["!ref"] || "A1:A1");
+  const addresses = Object.keys(sheet).filter(key => !key.startsWith("!"));
 
-  for (let r = range.s.r; r <= range.e.r; r++) {
-    for (let c = range.s.c; c <= range.e.c; c++) {
-      const address = XLSX.utils.encode_cell({ r, c });
-      const cell = sheet[address];
-      if (!cell || typeof cell.v !== "string") continue;
+  for (const address of addresses) {
+    const cell = sheet[address];
+    if (!cell || typeof cell.v !== "string") continue;
 
-      const text = cell.v.trim();
-      if (!labels.some(re => re.test(text))) continue;
+    const text = cell.v.trim();
+    if (!labels.some(re => re.test(text))) continue;
 
-      for (let offset = 1; offset <= 8; offset++) {
-        const valueAddress = XLSX.utils.encode_cell({ r, c: c + offset });
-        const value = sheet[valueAddress]?.v;
-        if (typeof value === "number") {
-          return { address: valueAddress, value };
-        }
+    const decoded = XLSX.utils.decode_cell(address);
+    for (let offset = 1; offset <= 8; offset++) {
+      const valueAddress = XLSX.utils.encode_cell({
+        r: decoded.r,
+        c: decoded.c + offset
+      });
+      const value = sheet[valueAddress]?.v;
+      if (typeof value === "number") {
+        return { address: valueAddress, value };
       }
     }
   }
@@ -418,49 +419,49 @@ export function analyzeWorkbook(
 
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
-    const ref = sheet["!ref"];
-    if (!ref) continue;
+    const addresses = Object.keys(sheet).filter(key => !key.startsWith("!"));
 
-    const range = XLSX.utils.decode_range(ref);
+    for (const address of addresses) {
+      const cell = sheet[address];
+      if (!cell) continue;
 
-    for (let r = range.s.r; r <= range.e.r; r++) {
-      for (let c = range.s.c; c <= range.e.c; c++) {
-        const address = XLSX.utils.encode_cell({ r, c });
-        const cell = sheet[address];
-        if (!cell) continue;
+      populatedCells++;
+      if (populatedCells > 350000) {
+        throw new Error(
+          "Workbook exceeds ERXL's 350,000 populated-cell analysis limit."
+        );
+      }
 
-        populatedCells++;
+      const decoded = XLSX.utils.decode_cell(address);
+      const formula =
+        typeof cell.f === "string" && cell.f.length ? cell.f : undefined;
 
-        const formula =
-          typeof cell.f === "string" && cell.f.length ? cell.f : undefined;
+      if (formula) formulaCells++;
 
-        if (formula) formulaCells++;
+      const node: CellNode = {
+        key: `${sheetName}!${address}`,
+        sheet: sheetName,
+        address,
+        row: decoded.r,
+        col: decoded.c,
+        formula,
+        value: cell.v
+      };
 
-        const node: CellNode = {
-          key: `${sheetName}!${address}`,
+      nodes.push(node);
+
+      const excelError = errorDisplayValue(cell);
+      if (excelError) {
+        findings.push({
+          id: id("finding"),
+          severity: "critical",
+          code: "EXCEL_ERROR",
+          title: `Excel error value ${excelError}`,
           sheet: sheetName,
-          address,
-          row: r,
-          col: c,
-          formula,
-          value: cell.v
-        };
-
-        nodes.push(node);
-
-        const excelError = errorDisplayValue(cell);
-        if (excelError) {
-          findings.push({
-            id: id("finding"),
-            severity: "critical",
-            code: "EXCEL_ERROR",
-            title: `Excel error value ${excelError}`,
-            sheet: sheetName,
-            cell: address,
-            details: "The workbook contains an explicit Excel error value.",
-            evidence: { value: excelError, formula }
-          });
-        }
+          cell: address,
+          details: "The workbook contains an explicit Excel error value.",
+          evidence: { value: excelError, formula }
+        });
       }
     }
   }
