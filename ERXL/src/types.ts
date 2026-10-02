@@ -79,6 +79,24 @@ export interface IdentityHypothesisScore {
   matched: boolean;
 }
 
+export interface SemanticViolationGroup {
+  id: string;
+  identityName: string;
+  targetRole: SemanticRole;
+  sheet: string;
+  affectedCells: string[];
+  affectedRange: string;
+  affectedCount: number;
+  canonicalExpression: string;
+  semanticExpression: string;
+  explanation: string;
+  confidence: number;
+  hypotheses: IdentityHypothesisScore[];
+  assessmentIds: string[];
+  rootCauseCandidates: RootCauseCandidate[];
+  worstMateriality?: MaterialityEstimate;
+}
+
 export interface SemanticIdentityAssessment {
   id: string;
   targetNodeId: string;
@@ -144,6 +162,7 @@ export interface WorkbookSummary {
   semanticNodes: number;
   identityChecks: number;
   identityViolations: number;
+  identityViolationGroups: number;
   counterfactualTests: number;
   testsPassed: number;
   testsFailed: number;
@@ -158,5 +177,6 @@ export interface AnalysisResult {
   findings: Finding[];
   semanticNodes: SemanticNode[];
   identityAssessments: SemanticIdentityAssessment[];
+  identityViolationGroups: SemanticViolationGroup[];
   counterfactualTests: CounterfactualTest[];
 }
