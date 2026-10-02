@@ -472,7 +472,7 @@ class Tokenizer {
       return { type: "ref", value: quotedRef[0] };
     }
 
-    const sheetRef = rest.match(/^[A-Za-z0-9_. -]+!\$?[A-Z]{1,3}\$?\d+/i);
+    const sheetRef = rest.match(/^[A-Za-z_][A-Za-z0-9_. -]*!\$?[A-Z]{1,3}\$?\d+/i);
     if (sheetRef) {
       this.index += sheetRef[0].length;
       return { type: "ref", value: sheetRef[0] };
