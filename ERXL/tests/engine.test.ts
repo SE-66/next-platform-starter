@@ -96,7 +96,7 @@ function anomalyWorkbookBytes(): ArrayBuffer {
     ["Cycle B", null]
   ]);
   checks.B1 = { t: "n", f: "B2+1", v: 1 };
-  checks.B2 = { t: "n", f: "B1-1", v: 0 };
+  checks.B2 = { t: "n", f: "B1-1" };
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, operating, "Operating_Model");
@@ -183,5 +183,51 @@ describe("ERXL formula evaluator", () => {
 
     const evaluator = new WorkbookEvaluator(workbook);
     expect(evaluator.evaluateNumber("Debt_Schedule!B1")).toBeCloseTo(24.5, 8);
+  });
+});
+
+
+function dashboardWorkbookBytes(): ArrayBuffer {
+  const dashboard = XLSX.utils.aoa_to_sheet([
+    ["", "", "", "Metric", "2026A", "2027E", "2028E", "2029E", "2030E", "2031E"],
+    ["KPI", 100, "", "Revenue", null, null, null, null, null, null]
+  ]);
+
+  dashboard.B2 = { t: "n", f: "Model!G1", v: 600 };
+  for (const [cell, ref, value] of [
+    ["E2", "Model!B1", 100],
+    ["F2", "Model!C1", 200],
+    ["G2", "Model!D1", 300],
+    ["H2", "Model!E1", 400],
+    ["I2", "Model!F1", 500],
+    ["J2", "Model!G1", 600]
+  ] as Array<[string, string, number]>) {
+    dashboard[cell] = { t: "n", f: ref, v: value };
+  }
+
+  const model = XLSX.utils.aoa_to_sheet([[100, 200, 300, 400, 500, 600]]);
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, model, "Model");
+  XLSX.utils.book_append_sheet(workbook, dashboard, "Dashboard");
+
+  return XLSX.write(workbook, {
+    type: "array",
+    bookType: "xlsx"
+  }) as ArrayBuffer;
+}
+
+describe("ERXL formula-band precision", () => {
+  it("does not compare a separated dashboard KPI with a chart formula band", () => {
+    const result = analyzeWorkbook(dashboardWorkbookBytes(), "dashboard.xlsx");
+
+    expect(
+      result.findings.some(
+        finding =>
+          finding.code === "FORMULA_OUTLIER" &&
+          finding.sheet === "Dashboard" &&
+          finding.cell === "B2"
+      )
+    ).toBe(false);
   });
 });
