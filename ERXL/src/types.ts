@@ -96,6 +96,9 @@ export interface WorkbookSummary {
   findings: number;
   semanticNodes: number;
   counterfactualTests: number;
+  testsPassed: number;
+  testsFailed: number;
+  testsUnsupported: number;
 }
 
 export interface AnalysisResult {
