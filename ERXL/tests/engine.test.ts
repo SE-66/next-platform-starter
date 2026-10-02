@@ -231,3 +231,115 @@ describe("ERXL formula-band precision", () => {
     ).toBe(false);
   });
 });
+
+
+function semanticIdentityWorkbookBytes(): ArrayBuffer {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["Metric", "2027E", "2028E", "2029E", "2030E", "2031E"],
+    ["Revenue", 100, 110, 120, 130, 140],
+    ["EBITDA", 20, 22, 24, 26, 28],
+    ["Exit Multiple", 8, 8, 8, 8, 8],
+    ["Enterprise Value", null, null, null, null, null]
+  ]);
+
+  for (const col of ["B", "C", "D", "E", "F"]) {
+    const revenue = sheet[col + "2"]?.v as number;
+    const multiple = sheet[col + "4"]?.v as number;
+    sheet[col + "5"] = {
+      t: "n",
+      f: col + "2*" + col + "4",
+      v: revenue * multiple
+    };
+  }
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Valuation");
+
+  return XLSX.write(workbook, {
+    type: "array",
+    bookType: "xlsx"
+  }) as ArrayBuffer;
+}
+
+function semanticInterestWorkbookBytes(): ArrayBuffer {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["Metric", "2027E", "2028E", "2029E", "2030E"],
+    ["Debt", 100, 100, 100, 100],
+    ["SOFR / Base Rate", 0.05, 0.05, 0.05, 0.05],
+    ["Debt Spread", 0.03, 0.03, 0.03, 0.03],
+    ["Interest Expense", null, null, null, null]
+  ]);
+
+  for (const col of ["B", "C", "D", "E"]) {
+    sheet[col + "5"] = {
+      t: "n",
+      f: col + "2*(" + col + "4-" + col + "3)",
+      v: -2
+    };
+  }
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Debt_Schedule");
+
+  return XLSX.write(workbook, {
+    type: "array",
+    bookType: "xlsx"
+  }) as ArrayBuffer;
+}
+
+describe("ERXL v0.3 semantic identity reasoning", () => {
+  it("detects a consistently copied Revenue × Exit Multiple valuation bug", () => {
+    const result = analyzeWorkbook(
+      semanticIdentityWorkbookBytes(),
+      "semantic-valuation.xlsx"
+    );
+
+    const violations = result.identityAssessments.filter(
+      assessment =>
+        assessment.targetRole === "enterprise_value" &&
+        assessment.status === "violated"
+    );
+
+    expect(violations.length).toBe(5);
+    expect(
+      result.findings.some(
+        finding => finding.code === "SEMANTIC_IDENTITY_VIOLATION"
+      )
+    ).toBe(true);
+
+    expect(
+      result.findings.some(
+        finding =>
+          finding.code === "FORMULA_OUTLIER" &&
+          finding.sheet === "Valuation"
+      )
+    ).toBe(false);
+
+    const sample = violations[0];
+    expect(sample.hypotheses.some(
+      hypothesis =>
+        !hypothesis.canonical &&
+        hypothesis.name.includes("Revenue multiple") &&
+        hypothesis.matched
+    )).toBe(true);
+    expect(sample.materiality?.relativeImpact).toBeGreaterThan(1);
+  });
+
+  it("detects a consistently copied rate-subtraction interest bug", () => {
+    const result = analyzeWorkbook(
+      semanticInterestWorkbookBytes(),
+      "semantic-interest.xlsx"
+    );
+
+    expect(
+      result.identityAssessments.some(
+        assessment =>
+          assessment.targetRole === "interest_expense" &&
+          assessment.status === "violated" &&
+          assessment.semanticExpression.includes(
+            "@interest_rate-@interest_rate"
+          )
+      )
+    ).toBe(true);
+  });
+});
