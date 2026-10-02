@@ -1,0 +1,14 @@
+{
+  "$schema": "./ERXL/node_modules/wrangler/config-schema.json",
+  "name": "erxl",
+  "main": "ERXL/src/index.ts",
+  "compatibility_date": "2026-10-02",
+  "vars": {
+    "SUPABASE_URL": "https://fganrvamurjqtbslaqys.supabase.co"
+  },
+  "assets": {
+    "directory": "./ERXL/public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  }
+}
