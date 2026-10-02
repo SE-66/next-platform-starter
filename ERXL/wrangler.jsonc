@@ -3,6 +3,9 @@
   "name": "erxl",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-02",
+  "vars": {
+    "SUPABASE_URL": "https://fganrvamurjqtbslaqys.supabase.co"
+  },
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
