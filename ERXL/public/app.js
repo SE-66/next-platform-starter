@@ -29,11 +29,12 @@ function pct(value) {
 function renderMetrics(summary) {
   const items = [
     ["Sheets", summary.sheets],
-    ["Cells", summary.populatedCells],
     ["Formulas", summary.formulaCells],
     ["Findings", summary.findings],
-    ["Semantic nodes", summary.semanticNodes],
-    ["Generated tests", summary.counterfactualTests]
+    ["Tests", summary.counterfactualTests],
+    ["Passed", summary.testsPassed],
+    ["Failed", summary.testsFailed],
+    ["Unsupported", summary.testsUnsupported]
   ];
 
   metricsEl.innerHTML = items.map(([label, value]) => `
@@ -115,7 +116,9 @@ function renderTests(tests) {
     <div class="test-grid">
       ${tests.map(test => `
         <article class="test-card">
-          <div class="eyebrow">Confidence ${pct(test.confidence)}</div>
+          <div class="eyebrow">
+            Confidence ${pct(test.confidence)} · ${esc(test.executionStatus)}
+          </div>
           <h3>${esc(test.title)}</h3>
           <div class="test-route">
             <span class="node">${esc(test.input.sheet)}!${esc(test.input.cell)}</span>
@@ -124,10 +127,14 @@ function renderTests(tests) {
           </div>
           <p>${esc(test.rationale)}</p>
           <div class="meta">
-            Baseline: ${test.input.baselineValue === undefined ? "unknown" : esc(test.input.baselineValue)}
+            Input baseline: ${test.input.baselineValue === undefined ? "unknown" : esc(test.input.baselineValue)}
+            ${test.perturbedInput === undefined ? "" : " · Perturbed input: " + esc(test.perturbedInput)}
+            ${test.baselineOutput === undefined ? "" : " · Output: " + esc(test.baselineOutput)}
+            ${test.perturbedOutput === undefined ? "" : " → " + esc(test.perturbedOutput)}
+            ${test.observedDirection ? " · Observed: " + esc(test.observedDirection) : ""}
             · Path length: ${esc(test.dependencyPath.length)}
-            · Status: ${esc(test.executionStatus)}
           </div>
+          ${test.executionError ? `<p class="meta">Not executed: ${esc(test.executionError)}</p>` : ""}
         </article>
       `).join("")}
     </div>
