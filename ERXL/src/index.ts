@@ -56,7 +56,7 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/health") {
-      return json({ ok: true, service: "ERXL", version: "0.4.0" });
+      return json({ ok: true, service: "ERXL", version: "0.4.1" });
     }
 
     if (url.pathname === "/api/analyze" && request.method === "POST") {

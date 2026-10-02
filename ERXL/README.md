@@ -2,6 +2,20 @@
 
 ERXL is a financial-model error-finding, semantic-reasoning, and counterfactual-testing engine for Excel.
 
+## ERXL v0.4.1 — Directional Ratio Ranking
+
+v0.4.1 fixes the ratio-orientation weakness exposed by Test 6 without adding a hard-coded EBITDA-margin formula.
+
+The automatic hypothesis ranker now adds:
+
+- **ordered-role scoring**: for rate/margin targets, semantic overlap with the target is rewarded more strongly in the numerator than in the denominator;
+- **generic base-vs-component scoring**: broader scale roles such as Revenue and Assets receive higher denominator-base scores than component measures such as EBITDA, COGS, SG&A, and interest expense;
+- **ratio scale sanity**: decimal-sized rate hypotheses receive a small plausibility bonus, while extreme inverse ratios receive a soft penalty rather than being forbidden;
+- regression coverage requiring `EBITDA ÷ Revenue` to outrank `Revenue ÷ EBITDA`;
+- regression coverage preserving `Gross Profit ÷ Revenue` over `COGS ÷ Revenue`.
+
+The implementation remains hypothesis-based and experimental: the preferred candidate is still verified against the workbook through a discriminating perturbation.
+
 ## ERXL v0.4 — Automatic Hypothesis Generation
 
 v0.4 adds an experimental reasoning layer that does not require an exact hand-authored financial identity for every target.
@@ -204,6 +218,7 @@ Regression coverage includes:
 - automatically generated Enterprise Value hypotheses
 - automatically generated enterprise-to-equity bridge hypotheses
 - Gross Margin discovery beyond the hand-authored identity library
+- directional ratio ranking for Gross Margin and EBITDA Margin
 
 ## Next research milestone
 

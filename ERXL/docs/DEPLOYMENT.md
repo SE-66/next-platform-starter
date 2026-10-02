@@ -76,7 +76,7 @@ GET /api/health
 Expected service version:
 
 ```text
-0.4.0
+0.4.1
 ```
 
 Then upload a small `.xlsx` workbook in the browser.
