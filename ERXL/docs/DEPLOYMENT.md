@@ -17,6 +17,7 @@ ERXL/supabase/migrations/001_initial_schema.sql
 ERXL/supabase/migrations/002_semantic_testing.sql
 ERXL/supabase/migrations/003_semantic_identity_reasoning.sql
 ERXL/supabase/migrations/004_semantic_violation_groups.sql
+ERXL/supabase/migrations/005_automatic_hypothesis_generation.sql
 ```
 
 Do not add public RLS policies unless the access model changes. The current browser never talks directly to the ERXL tables.
@@ -75,7 +76,7 @@ GET /api/health
 Expected service version:
 
 ```text
-0.3.1
+0.4.0
 ```
 
 Then upload a small `.xlsx` workbook in the browser.
@@ -84,6 +85,9 @@ Verify that the result contains:
 
 - structural findings
 - semantic nodes
+- semantic identity issue families
+- generated hypotheses
+- hypothesis experiments
 - counterfactual tests
 - execution statuses
 - Supabase persistence status
