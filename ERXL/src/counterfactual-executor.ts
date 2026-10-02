@@ -37,7 +37,7 @@ function passesExpectation(
 export function executeCounterfactualTests(
   workbook: XLSX.WorkBook,
   tests: CounterfactualTest[],
-  maxExecuted = 24
+  maxExecuted = 40
 ): CounterfactualTest[] {
   const evaluator = new WorkbookEvaluator(workbook);
 
@@ -70,6 +70,18 @@ export function executeCounterfactualTests(
         perturbedOutput
       );
 
+      const absoluteImpact = Math.abs(perturbedOutput - baselineOutput);
+      const relativeImpact =
+        absoluteImpact / Math.max(Math.abs(baselineOutput), 1e-9);
+      const materialityRank =
+        relativeImpact >= 0.2
+          ? "critical"
+          : relativeImpact >= 0.1
+            ? "high"
+            : relativeImpact >= 0.02
+              ? "medium"
+              : "low";
+
       return {
         ...test,
         executionStatus: passesExpectation(
@@ -81,7 +93,10 @@ export function executeCounterfactualTests(
         baselineOutput,
         perturbedInput: changedInput,
         perturbedOutput,
-        observedDirection: direction
+        observedDirection: direction,
+        absoluteImpact,
+        relativeImpact,
+        materialityRank
       };
     } catch (error) {
       return {
