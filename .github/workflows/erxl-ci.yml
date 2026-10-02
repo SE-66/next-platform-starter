@@ -1,0 +1,25 @@
+name: ERXL CI
+
+on:
+  push:
+    branches: [ERXL]
+    paths:
+      - "ERXL/**"
+      - ".github/workflows/erxl-ci.yml"
+  pull_request:
+    paths:
+      - "ERXL/**"
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ERXL
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts
+      - run: npm run typecheck
