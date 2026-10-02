@@ -22,5 +22,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Validate Cloudflare root build path
+      - name: Validate ERXL tests
         run: npm run build
+      - name: Validate Cloudflare bundle
+        run: npx wrangler@4.147.0 deploy --dry-run --outdir .wrangler-dry-run
