@@ -7,10 +7,12 @@ const metricsEl = document.querySelector("#metrics");
 const findingsEl = document.querySelector("#findings");
 const semanticEl = document.querySelector("#semantic-nodes");
 const identityEl = document.querySelector("#identity-assessments");
+const hypothesisEl = document.querySelector("#hypothesis-experiments");
 const testsEl = document.querySelector("#tests");
 const findingCount = document.querySelector("#finding-count");
 const semanticCount = document.querySelector("#semantic-count");
 const identityCount = document.querySelector("#identity-count");
+const hypothesisCount = document.querySelector("#hypothesis-count");
 const testCount = document.querySelector("#test-count");
 const runMeta = document.querySelector("#run-meta");
 
@@ -36,6 +38,9 @@ function renderMetrics(summary) {
     ["Identity checks", summary.identityChecks],
     ["Identity violations", summary.identityViolations],
     ["Issue families", summary.identityViolationGroups],
+    ["Generated hypotheses", summary.generatedHypotheses],
+    ["Hypothesis experiments", summary.hypothesisExperiments],
+    ["Hypothesis mismatches", summary.hypothesisMismatches],
     ["Tests", summary.counterfactualTests],
     ["Passed", summary.testsPassed],
     ["Failed", summary.testsFailed],
@@ -208,6 +213,57 @@ function renderIdentities(assessments, groups) {
       : "");
 }
 
+
+function renderHypothesisExperiments(experiments) {
+  const mismatches = experiments.filter(item => item.mismatch);
+  hypothesisCount.textContent =
+    `${experiments.length} experiments · ${mismatches.length} mismatches`;
+
+  if (!experiments.length) {
+    hypothesisEl.innerHTML =
+      '<div class="empty">No target had enough compatible semantic inputs to generate competing hypotheses.</div>';
+    return;
+  }
+
+  hypothesisEl.innerHTML = experiments
+    .slice()
+    .sort((a, b) => Number(b.mismatch) - Number(a.mismatch))
+    .slice(0, 60)
+    .map(item => {
+      const perturbation = item.perturbation;
+      const materiality = item.materiality;
+      const prediction = (item.predictions || [])
+        .find(pred => pred.hypothesisId === item.implementedHypothesisId);
+
+      return `
+        <article class="finding">
+          <div class="severity ${item.mismatch ? (materiality?.rank === "critical" ? "critical" : "high") : item.status === "ambiguous" ? "medium" : "low"}">
+            ${item.mismatch ? "mismatch" : esc(item.status)}
+          </div>
+          <h3>${esc(item.targetRole)} · ${esc(item.sheet)}!${esc(item.cell)}</h3>
+          <p><strong>Preferred generated hypothesis:</strong> ${esc(item.preferredExpression)}</p>
+          <p><strong>Implemented behavior:</strong> ${esc(item.implementedExpression || "not resolved")}</p>
+          <p>${esc(item.explanation)}</p>
+          ${perturbation ? `
+            <div class="meta">
+              Discriminating perturbation:
+              <code>${esc(perturbation.key)}</code>
+              +${esc((Number(perturbation.perturbationPercent) * 100).toFixed(1))}%
+              · ${esc(perturbation.baselineValue)} → ${esc(perturbation.perturbedValue)}
+            </div>
+          ` : ""}
+          <div class="meta">
+            ${item.implementedMatchScore === undefined ? "" : "Implemented match: " + esc(Math.round(item.implementedMatchScore * 100)) + "%"}
+            ${item.plausibilityGap === undefined ? "" : " · Plausibility gap: " + esc(Math.round(item.plausibilityGap * 100)) + "pp"}
+            ${prediction?.normalizedError === undefined ? "" : " · prediction error: " + esc((prediction.normalizedError * 100).toFixed(1)) + "%"}
+            ${materiality?.rank ? " · Materiality: " + esc(materiality.rank) : ""}
+            ${materiality?.relativeImpact === undefined ? "" : " (" + esc((materiality.relativeImpact * 100).toFixed(1)) + "%)"}
+          </div>
+        </article>
+      `;
+    }).join("");
+}
+
 function renderTests(tests) {
   testCount.textContent = `${tests.length} generated`;
 
@@ -279,6 +335,7 @@ form.addEventListener("submit", async event => {
       data.identityAssessments || [],
       data.identityViolationGroups || []
     );
+    renderHypothesisExperiments(data.hypothesisExperiments || []);
     renderTests(data.counterfactualTests || []);
 
     runMeta.innerHTML =
