@@ -1,6 +1,7 @@
 import type {
   AnalysisResult,
   CounterfactualTest,
+  SemanticIdentityAssessment,
   SemanticNode
 } from "./types";
 
@@ -78,7 +79,36 @@ function testRows(runId: string, tests: CounterfactualTest[]) {
     perturbed_input: test.perturbedInput ?? null,
     perturbed_output: test.perturbedOutput ?? null,
     observed_direction: test.observedDirection ?? null,
-    execution_error: test.executionError ?? null
+    execution_error: test.executionError ?? null,
+    absolute_impact: test.absoluteImpact ?? null,
+    relative_impact: test.relativeImpact ?? null,
+    materiality_rank: test.materialityRank ?? null
+  }));
+}
+
+
+function identityRows(
+  runId: string,
+  assessments: SemanticIdentityAssessment[]
+) {
+  return assessments.map(assessment => ({
+    id: assessment.id,
+    analysis_run_id: runId,
+    target_semantic_node_id: assessment.targetNodeId,
+    target_key: assessment.targetKey,
+    target_role: assessment.targetRole,
+    sheet_name: assessment.sheet,
+    cell_address: assessment.cell,
+    identity_name: assessment.identityName,
+    canonical_expression: assessment.canonicalExpression,
+    semantic_expression: assessment.semanticExpression,
+    observed_roles: assessment.observedRoles,
+    status: assessment.status,
+    confidence: assessment.confidence,
+    hypotheses: assessment.hypotheses,
+    explanation: assessment.explanation,
+    root_cause_candidates: assessment.rootCauseCandidates,
+    materiality: assessment.materiality ?? null
   }));
 }
 
@@ -97,6 +127,8 @@ export async function persistAnalysis(
     formula_cell_count: result.summary.formulaCells,
     finding_count: result.summary.findings,
     semantic_node_count: result.summary.semanticNodes,
+    identity_check_count: result.summary.identityChecks,
+    identity_violation_count: result.summary.identityViolations,
     counterfactual_test_count: result.summary.counterfactualTests,
     tests_passed: result.summary.testsPassed,
     tests_failed: result.summary.testsFailed,
@@ -123,6 +155,14 @@ export async function persistAnalysis(
 
   if (result.semanticNodes.length) {
     await post(env, "semantic_nodes", semanticRows(result.runId, result.semanticNodes));
+  }
+
+  if (result.identityAssessments.length) {
+    await post(
+      env,
+      "identity_assessments",
+      identityRows(result.runId, result.identityAssessments)
+    );
   }
 
   if (result.counterfactualTests.length) {
