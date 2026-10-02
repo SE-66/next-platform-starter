@@ -2,6 +2,16 @@
 
 ERXL is a financial-model error-finding, semantic-reasoning, and counterfactual-testing engine for Excel.
 
+## ERXL v0.3.1
+
+v0.3.1 improves semantic defect precision:
+
+- recognizes formatted Debt and Cash labels such as `Debt ($mm)` and `Cash ($mm)`
+- conclusively identifies `Revenue - Debt` as an invalid enterprise-to-equity bridge when the relevant roles are present
+- aggregates repeated period-level semantic violations into one model-level issue family
+- reports affected range, affected period count, representative root causes, and worst materiality
+- persists issue families in Supabase
+
 ## ERXL v0.3
 
 Upload an `.xlsx` workbook and ERXL now performs four layers of analysis:
@@ -135,6 +145,7 @@ Migrations:
 001_initial_schema.sql
 002_semantic_testing.sql
 003_semantic_identity_reasoning.sql
+004_semantic_violation_groups.sql
 ```
 
 All ERXL tables use RLS with no public browser policies. The Cloudflare Worker writes using the server-side Supabase secret.
