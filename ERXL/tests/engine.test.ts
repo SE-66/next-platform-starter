@@ -629,3 +629,140 @@ describe("ERXL v0.4 discovery beyond the hand-authored identity library", () => 
     ).toBe(true);
   });
 });
+
+
+function directionalRatioWorkbookBytes(): ArrayBuffer {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["Metric", "2027E", "2028E", "2029E", "2030E", "2031E"],
+    ["Revenue ($mm)", 500, 550, 605, 665.5, 732.05],
+    ["COGS ($mm)", 300, 327, 356, 388, 423],
+    ["SG&A ($mm)", 70, 74, 78, 82, 87],
+    ["Gross Profit ($mm)", null, null, null, null, null],
+    ["EBITDA ($mm)", null, null, null, null, null],
+    ["Gross Margin", null, null, null, null, null],
+    ["EBITDA Margin", null, null, null, null, null]
+  ]);
+
+  for (const col of ["B", "C", "D", "E", "F"]) {
+    const revenue = sheet[col + "2"]?.v as number;
+    const cogs = sheet[col + "3"]?.v as number;
+    const sga = sheet[col + "4"]?.v as number;
+    const grossProfit = revenue - cogs;
+    const ebitda = grossProfit - sga;
+
+    sheet[col + "5"] = {
+      t: "n",
+      f: col + "2-" + col + "3",
+      v: grossProfit
+    };
+
+    sheet[col + "6"] = {
+      t: "n",
+      f: col + "5-" + col + "4",
+      v: ebitda
+    };
+
+    // Wrong but consistently copied formulas from the v0.4 benchmark.
+    sheet[col + "7"] = {
+      t: "n",
+      f: col + "3/" + col + "2",
+      v: cogs / revenue
+    };
+
+    sheet[col + "8"] = {
+      t: "n",
+      f: col + "5/" + col + "2",
+      v: grossProfit / revenue
+    };
+  }
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Operating_Model");
+
+  return XLSX.write(workbook, {
+    type: "array",
+    bookType: "xlsx"
+  }) as ArrayBuffer;
+}
+
+describe("ERXL v0.4.1 directional ratio ranking", () => {
+  it("prefers EBITDA divided by Revenue over the inverse ratio", () => {
+    const result = analyzeWorkbook(
+      directionalRatioWorkbookBytes(),
+      "directional-ratio.xlsx"
+    );
+
+    const experiment = result.hypothesisExperiments.find(
+      item =>
+        item.targetRole === "ebitda_margin" &&
+        item.sheet === "Operating_Model" &&
+        item.cell === "B8"
+    );
+
+    expect(experiment).toBeDefined();
+    expect(experiment?.status).toBe("executed");
+    expect(experiment?.mismatch).toBe(true);
+    expect(experiment?.preferredExpression.toLowerCase()).toContain("ebitda");
+    expect(experiment?.preferredExpression.toLowerCase()).toContain("revenue");
+    expect(experiment?.preferredExpression.indexOf("EBITDA")).toBeLessThan(
+      experiment?.preferredExpression.indexOf("Revenue") ?? -1
+    );
+    expect(experiment?.implementedExpression?.toLowerCase()).toContain(
+      "gross profit"
+    );
+    expect(experiment?.implementedExpression?.toLowerCase()).toContain(
+      "revenue"
+    );
+
+    const candidates = result.generatedHypotheses.filter(
+      hypothesis =>
+        hypothesis.targetRole === "ebitda_margin" &&
+        hypothesis.sheet === "Operating_Model" &&
+        hypothesis.cell === "B8" &&
+        hypothesis.operator === "divide"
+    );
+
+    const correct = candidates.find(
+      hypothesis =>
+        hypothesis.semanticExpression === "@ebitda/@revenue"
+    );
+    const inverse = candidates.find(
+      hypothesis =>
+        hypothesis.semanticExpression === "@revenue/@ebitda"
+    );
+
+    expect(correct).toBeDefined();
+    expect(inverse).toBeDefined();
+    expect(correct!.plausibilityScore).toBeGreaterThan(
+      inverse!.plausibilityScore
+    );
+    expect(correct!.baselinePrediction).toBeLessThan(1);
+    expect(inverse!.baselinePrediction).toBeGreaterThan(1);
+  });
+
+  it("keeps Gross Profit divided by Revenue above COGS divided by Revenue", () => {
+    const result = analyzeWorkbook(
+      directionalRatioWorkbookBytes(),
+      "directional-gross-margin.xlsx"
+    );
+
+    const experiment = result.hypothesisExperiments.find(
+      item =>
+        item.targetRole === "gross_margin" &&
+        item.sheet === "Operating_Model" &&
+        item.cell === "B7"
+    );
+
+    expect(experiment).toBeDefined();
+    expect(experiment?.status).toBe("executed");
+    expect(experiment?.mismatch).toBe(true);
+    expect(experiment?.preferredExpression.toLowerCase()).toContain(
+      "gross profit"
+    );
+    expect(experiment?.preferredExpression.toLowerCase()).toContain("revenue");
+    expect(experiment?.implementedExpression?.toLowerCase()).toContain("cogs");
+    expect(experiment?.implementedExpression?.toLowerCase()).toContain(
+      "revenue"
+    );
+  });
+});
