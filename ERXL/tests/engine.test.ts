@@ -549,3 +549,83 @@ describe("ERXL v0.4 automatic hypothesis generation", () => {
     ).toBe(true);
   });
 });
+
+
+function automaticMarginWorkbookBytes(): ArrayBuffer {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["Metric", "2027E", "2028E", "2029E", "2030E", "2031E"],
+    ["Revenue ($mm)", 500, 550, 600, 650, 700],
+    ["COGS ($mm)", 300, 325, 350, 375, 400],
+    ["Gross Profit ($mm)", null, null, null, null, null],
+    ["Gross Margin", null, null, null, null, null]
+  ]);
+
+  for (const col of ["B", "C", "D", "E", "F"]) {
+    const revenue = sheet[col + "2"]?.v as number;
+    const cogs = sheet[col + "3"]?.v as number;
+    const grossProfit = revenue - cogs;
+
+    sheet[col + "4"] = {
+      t: "n",
+      f: col + "2-" + col + "3",
+      v: grossProfit
+    };
+
+    // Deliberately wrong in every period. There is no hand-authored
+    // gross-margin identity rule in v0.3.x; v0.4 must generate candidates.
+    sheet[col + "5"] = {
+      t: "n",
+      f: col + "3/" + col + "2",
+      v: cogs / revenue
+    };
+  }
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Margins");
+
+  return XLSX.write(workbook, {
+    type: "array",
+    bookType: "xlsx"
+  }) as ArrayBuffer;
+}
+
+describe("ERXL v0.4 discovery beyond the hand-authored identity library", () => {
+  it("discovers a gross-margin driver substitution using generated hypotheses", () => {
+    const result = analyzeWorkbook(
+      automaticMarginWorkbookBytes(),
+      "automatic-margin.xlsx"
+    );
+
+    expect(
+      result.identityAssessments.some(
+        assessment => assessment.targetRole === "gross_margin"
+      )
+    ).toBe(false);
+
+    const experiment = result.hypothesisExperiments.find(
+      item =>
+        item.targetRole === "gross_margin" &&
+        item.sheet === "Margins" &&
+        item.cell === "B5"
+    );
+
+    expect(experiment).toBeDefined();
+    expect(experiment?.status).toBe("executed");
+    expect(experiment?.mismatch).toBe(true);
+    expect(experiment?.preferredExpression.toLowerCase()).toContain(
+      "gross profit"
+    );
+    expect(experiment?.preferredExpression.toLowerCase()).toContain("revenue");
+    expect(experiment?.implementedExpression?.toLowerCase()).toContain("cogs");
+    expect(experiment?.implementedExpression?.toLowerCase()).toContain("revenue");
+
+    expect(
+      result.findings.some(
+        finding =>
+          finding.code === "AUTOMATIC_HYPOTHESIS_MISMATCH" &&
+          finding.sheet === "Margins" &&
+          finding.cell === "B5:F5"
+      )
+    ).toBe(true);
+  });
+});
