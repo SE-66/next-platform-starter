@@ -387,7 +387,8 @@ function detectSemanticDependencyOutliers(
 
   return findings;
 }
-\nfunction errorDisplayValue(cell: XLSX.CellObject): string | undefined {
+
+function errorDisplayValue(cell: XLSX.CellObject): string | undefined {
   if (typeof cell.v === "string" && ERROR_VALUES.has(cell.v.toUpperCase())) {
     return cell.v.toUpperCase();
   }
