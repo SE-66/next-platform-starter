@@ -169,7 +169,8 @@ function affinity(target: SemanticRole, source: SemanticRole): number {
 }
 
 function label(node: SemanticNode): string {
-  if (node.label?.trim()) return node.label.replace(/s*([^)]*)s*$/, "").trim();
+  const raw = node.label?.trim();
+  if (raw) return raw;
   return node.role.replace(/_/g, " ");
 }
 
@@ -531,6 +532,7 @@ export function generateAutomaticHypotheses(
 ): GeneratedHypothesis[] {
   const evaluator = new WorkbookEvaluator(workbook);
   const byId = new Map(nodes.map(node => [node.id, node]));
+  const byKey = new Map(nodes.map(node => [node.key, node]));
   const all: GeneratedHypothesis[] = [];
 
   for (const target of nodes) {
@@ -657,15 +659,35 @@ export function generateAutomaticHypotheses(
       }
     }
 
-    const ranked = [...candidates.values()]
+    const fullyRanked = [...candidates.values()]
       .sort((a, b) => {
         const scoreDelta = b.plausibilityScore - a.plausibilityScore;
         if (scoreDelta) return scoreDelta;
         return a.sourceNodeIds.length - b.sourceNodeIds.length;
-      })
-      .slice(0, maxPerTarget);
+      });
 
-    all.push(...ranked);
+    const observedSemanticExpression = semanticizeObservedFormula(
+      target.formula,
+      target.sheet,
+      byKey
+    );
+    const observedShapeCandidates = fullyRanked.filter(
+      candidate =>
+        candidate.semanticExpression.toLowerCase() ===
+        observedSemanticExpression
+    );
+
+    const retained = [
+      ...fullyRanked.slice(0, Math.max(2, maxPerTarget - 2)),
+      ...observedShapeCandidates
+    ]
+      .filter(
+        (candidate, index, array) =>
+          array.findIndex(item => item.id === candidate.id) === index
+      )
+      .slice(0, maxPerTarget + 2);
+
+    all.push(...retained);
   }
 
   return all;
