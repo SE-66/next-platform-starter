@@ -455,3 +455,97 @@ describe("ERXL v0.3.1 grouped semantic defects", () => {
     ).toBe(false);
   });
 });
+
+
+describe("ERXL v0.4 automatic hypothesis generation", () => {
+  it("generates competing enterprise-value hypotheses and experimentally identifies the wrong implemented driver", () => {
+    const result = analyzeWorkbook(
+      semanticIdentityWorkbookBytes(),
+      "auto-hypothesis-valuation.xlsx"
+    );
+
+    const experiment = result.hypothesisExperiments.find(
+      item =>
+        item.targetRole === "enterprise_value" &&
+        item.sheet === "Valuation" &&
+        item.cell === "B5"
+    );
+
+    expect(experiment).toBeDefined();
+    expect(experiment?.status).toBe("executed");
+    expect(experiment?.mismatch).toBe(true);
+    expect(experiment?.preferredExpression.toLowerCase()).toContain("ebitda");
+    expect(experiment?.preferredExpression.toLowerCase()).toContain("exit multiple");
+    expect(experiment?.implementedExpression?.toLowerCase()).toContain("revenue");
+    expect(experiment?.implementedExpression?.toLowerCase()).toContain("exit multiple");
+    expect(experiment?.perturbation).toBeDefined();
+    expect(experiment?.implementedMatchScore).toBeGreaterThan(0.9);
+
+    const generatedForTarget = result.generatedHypotheses.filter(
+      hypothesis =>
+        hypothesis.targetRole === "enterprise_value" &&
+        hypothesis.sheet === "Valuation" &&
+        hypothesis.cell === "B5"
+    );
+
+    expect(
+      generatedForTarget.some(
+        hypothesis =>
+          hypothesis.semanticExpression.includes("@ebitda") &&
+          hypothesis.semanticExpression.includes("@exit_multiple")
+      )
+    ).toBe(true);
+
+    expect(
+      generatedForTarget.some(
+        hypothesis =>
+          hypothesis.semanticExpression.includes("@revenue") &&
+          hypothesis.semanticExpression.includes("@exit_multiple")
+      )
+    ).toBe(true);
+
+    expect(
+      result.findings.some(
+        finding =>
+          finding.code === "AUTOMATIC_HYPOTHESIS_MISMATCH" &&
+          finding.sheet === "Valuation"
+      )
+    ).toBe(true);
+  });
+
+  it("generates and distinguishes enterprise-to-equity bridge hypotheses without relying on a copied-formula anomaly", () => {
+    const result = analyzeWorkbook(
+      semanticEquityBridgeWorkbookBytes(),
+      "auto-hypothesis-equity.xlsx"
+    );
+
+    const experiment = result.hypothesisExperiments.find(
+      item =>
+        item.targetRole === "equity_value" &&
+        item.sheet === "Valuation" &&
+        item.cell === "B8"
+    );
+
+    expect(experiment).toBeDefined();
+    expect(experiment?.status).toBe("executed");
+    expect(experiment?.mismatch).toBe(true);
+    expect(experiment?.preferredExpression.toLowerCase()).toContain(
+      "enterprise value"
+    );
+    expect(experiment?.preferredExpression.toLowerCase()).toContain("debt");
+    expect(experiment?.preferredExpression.toLowerCase()).toContain("cash");
+    expect(experiment?.implementedExpression?.toLowerCase()).toContain("revenue");
+    expect(experiment?.implementedExpression?.toLowerCase()).toContain("debt");
+
+    const mismatchFindings = result.findings.filter(
+      finding =>
+        finding.code === "AUTOMATIC_HYPOTHESIS_MISMATCH" &&
+        finding.sheet === "Valuation"
+    );
+
+    expect(mismatchFindings.length).toBeGreaterThanOrEqual(1);
+    expect(
+      mismatchFindings.some(finding => finding.cell === "B8:F8")
+    ).toBe(true);
+  });
+});
