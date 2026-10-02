@@ -33,7 +33,8 @@ export interface Finding {
     | "HARDCODE_IN_FORMULA_REGION"
     | "CIRCULAR_REFERENCE"
     | "BALANCE_SHEET_MISMATCH"
-    | "SEMANTIC_DEPENDENCY_OUTLIER";
+    | "SEMANTIC_DEPENDENCY_OUTLIER"
+    | "COUNTERFACTUAL_TEST_FAILURE";
   title: string;
   sheet?: string;
   cell?: string;
@@ -80,7 +81,12 @@ export interface CounterfactualTest {
   dependencyPath: string[];
   confidence: number;
   rationale: string;
-  executionStatus: "generated";
+  executionStatus: "generated" | "passed" | "failed" | "unsupported";
+  baselineOutput?: number;
+  perturbedInput?: number;
+  perturbedOutput?: number;
+  observedDirection?: "increase" | "decrease" | "unchanged";
+  executionError?: string;
 }
 
 export interface WorkbookSummary {
