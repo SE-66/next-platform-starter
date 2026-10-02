@@ -1,29 +1,67 @@
 # ERXL
 
-ERXL is an error-finding and counterfactual testing engine for financial Excel models.
+ERXL is a financial-model error-finding, semantic-reasoning, and counterfactual-testing engine for Excel.
 
-## What ERXL does now
+## ERXL v0.3
 
-Upload an `.xlsx` workbook and ERXL will:
+Upload an `.xlsx` workbook and ERXL now performs four layers of analysis:
 
-- inventory populated cells and formulas
-- build a formula dependency graph
-- detect explicit Excel error values
-- detect circular formula references
-- detect suspicious hard-coded values in formula-dense rows
-- detect formula-pattern outliers
-- run a basic balance-sheet identity check when recognizable labels exist
-- infer supported financial roles from labels and workbook structure
-- compare semantic dependency patterns across comparable periods
-- generate targeted single-assumption counterfactual tests
-- recalculate supported formula paths inside the Worker
-- classify each executed counterfactual test as passed, failed, or unsupported
-- turn failed financial-direction tests into high-severity findings
-- persist analysis metadata, semantic nodes, tests, and outcomes to Supabase
+1. **Structural QA**
+   - Excel error values
+   - circular references
+   - formula-pattern outliers
+   - hardcodes embedded in formula sequences
+   - basic balance-sheet reconciliation
 
-ERXL does **not** claim that a workbook is correct when no issue is found.
+2. **Financial semantic inference**
+   - identifies supported concepts such as Revenue, Units, Price, COGS, SG&A, EBITDA, Debt, Cash, Interest Rate, Interest Expense, Enterprise Value, Equity Value, Exit Multiple, IRR, Capex, and Working Capital
+   - constructs semantic dependency relationships between recognized cells
 
-## Current architecture
+3. **Financial identity reasoning**
+   - rewrites formulas into role-level semantic expressions
+   - compares those expressions with canonical financial identities
+   - scores competing hypotheses
+   - can detect formulas that are copied consistently across all periods but use the wrong economic driver
+   - examples:
+     - `Enterprise Value = EBITDA × Exit Multiple`
+     - `Revenue = Units × Price`
+     - `Gross Profit = Revenue − COGS`
+     - `EBITDA = Gross Profit − SG&A`
+     - enterprise-to-equity value bridges
+     - debt / interest-rate relationships
+   - produces root-cause candidates and materiality estimates where a sufficiently exact identity is available
+
+4. **Counterfactual execution**
+   - generates targeted single-assumption perturbations
+   - executes up to 40 generated tests with ERXL's deterministic formula evaluator
+   - classifies tests as passed, failed, generated, or unsupported
+   - measures absolute and relative output impact
+   - localizes failed behavior back to violated semantic identities when possible
+
+ERXL does **not** claim that a workbook is correct merely because no issue is found.
+
+## Structurally consistent bug example
+
+A spreadsheet may use this formula in every forecast period:
+
+```text
+Enterprise Value = Revenue × Exit Multiple
+```
+
+Traditional copy-pattern analysis sees a perfectly consistent row.
+
+ERXL v0.3 instead recognizes:
+
+```text
+target role: enterprise_value
+observed semantic expression: @revenue * @exit_multiple
+canonical hypothesis: @ebitda * @exit_multiple
+competing hypothesis: Revenue multiple substituted for EBITDA multiple
+```
+
+and raises a `SEMANTIC_IDENTITY_VIOLATION`.
+
+## Architecture
 
 ```text
 Browser
@@ -32,45 +70,31 @@ Browser
 Cloudflare Worker
   |
   +--> XLSX parser
-  +--> structural checks
+  +--> structural QA
   +--> semantic-role inference
   +--> dependency graph
+  +--> financial identity / hypothesis engine
   +--> counterfactual test synthesis
   +--> deterministic formula evaluator
+  +--> root-cause + materiality layer
   |
   v
 Supabase
   +--> analysis_runs
   +--> findings
   +--> semantic_nodes
+  +--> identity_assessments
   +--> counterfactual_tests
 ```
 
-Uploaded workbook bytes are analyzed in memory. The current code stores analysis metadata and findings, not the workbook file itself.
-
-## Counterfactual example
-
-If ERXL recognizes:
-
-```text
-Interest Rate -> Interest Expense
-```
-
-and confirms a formula dependency path, it generates a one-cell test:
-
-```text
-Interest Rate +10%
-Expected: Interest Expense increases
-```
-
-If the supported formula evaluator recalculates the model and Interest Expense decreases, ERXL records a `COUNTERFACTUAL_TEST_FAILURE`.
+Uploaded workbook bytes are analyzed in memory. ERXL stores analysis metadata and results, not the uploaded workbook itself.
 
 ## Formula execution
 
-ERXL's deterministic evaluator supports a bounded subset of common Excel behavior, including:
+The bounded deterministic evaluator supports common Excel behavior including:
 
 - arithmetic and comparisons
-- direct cell references and normal rectangular ranges
+- direct cell references and rectangular ranges
 - SUM, AVERAGE, MIN, MAX
 - ABS, SQRT, POWER, MOD, SIGN
 - ROUND, ROUNDUP, ROUNDDOWN
@@ -81,16 +105,17 @@ ERXL's deterministic evaluator supports a bounded subset of common Excel behavio
 - SUMIF, COUNTIF, AVERAGEIF
 - SUMIFS, COUNTIFS, AVERAGEIFS
 
-Unsupported functions are explicitly marked `unsupported`; ERXL does not substitute cached Excel results for a perturbed calculation.
+Unsupported functions remain explicit. ERXL does not pretend a cached Excel value has been recalculated after a perturbation.
 
 ## Limits
 
 - `.xlsx` only
 - 12 MB upload limit
-- 350,000 populated-cell analysis limit
-- up to 24 generated tests are executed in-worker per analysis
-- dynamic references, macros, external-workbook links, structured references, and many specialist Excel functions are not yet supported
-- financial semantic inference is currently rule-based, not an LLM
+- 350,000 populated-cell limit
+- up to 40 counterfactual tests executed per analysis
+- macros, external workbook links, dynamic references, structured references, and many specialist Excel functions are not yet supported
+- semantic reasoning is currently deterministic/rule-driven rather than LLM-driven
+- financial identities are contextual rules, not universal accounting assertions; ambiguous cases are reported as ambiguous rather than forced into a violation
 
 ## Development
 
@@ -102,43 +127,33 @@ npm test
 npm run dev
 ```
 
-## Deployment
-
-See `docs/DEPLOYMENT.md`.
-
-Cloudflare deployment is intentionally manual-only. The GitHub workflow `.github/workflows/erxl-deploy-cloudflare.yml` runs only when manually dispatched.
-
 ## Database
 
-Apply migrations in order:
+Migrations:
 
 ```text
-supabase/migrations/001_initial_schema.sql
-supabase/migrations/002_semantic_testing.sql
+001_initial_schema.sql
+002_semantic_testing.sql
+003_semantic_identity_reasoning.sql
 ```
 
-All public-schema ERXL tables have RLS enabled and intentionally expose no browser policies. The Cloudflare Worker uses a server-side Supabase secret key.
+All ERXL tables use RLS with no public browser policies. The Cloudflare Worker writes using the server-side Supabase secret.
 
 ## Validation
 
-GitHub Actions workflow `ERXL CI` runs:
+ERXL CI validates the same root path used by Cloudflare and runs a Wrangler dry-run bundle.
 
-```text
-npm install --ignore-scripts
-npm run typecheck
-npm test
-```
+Regression coverage includes:
 
-The test suite includes a synthetic valid interest-expense model and a deliberately reversed model that ERXL must flag through counterfactual execution.
+- correct and reversed interest-rate sensitivity
+- wrong relative spreadsheet references
+- embedded hardcodes
+- circular references
+- separated Dashboard formula bands
+- cross-sheet formula parsing
+- a structurally consistent `Revenue × Exit Multiple` Enterprise Value bug
+- a structurally consistent interest-rate subtraction bug
 
-## Technical direction
+## Next research milestone
 
-The most strategically interesting ERXL work remains:
-
-1. broader semantic-role inference;
-2. automatic competing-hypothesis generation for ambiguous formulas;
-3. minimum discriminating perturbation synthesis;
-4. better fault localization from failed counterfactual tests;
-5. economic materiality ranking.
-
-Those mechanisms are more important for patent strategy than the broad idea of "AI checks spreadsheets."
+The next patent-relevant step is **automatic hypothesis generation and minimum discriminating perturbation synthesis** rather than a hand-authored identity library. That should be prior-art searched before being treated as a filing candidate.
