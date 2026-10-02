@@ -5,9 +5,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "cd ERXL && npm install --ignore-scripts && npm run typecheck && npm test",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "erxl:deploy": "npx wrangler deploy"
   },
   "dependencies": {
     "@netlify/blobs": "^10.5.0",
