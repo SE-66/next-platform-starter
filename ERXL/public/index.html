@@ -63,14 +63,31 @@
       <section class="panel">
         <div class="section-heading">
           <div>
+            <div class="eyebrow">Financial Identity Reasoning</div>
+            <h2>Semantic identity checks</h2>
+          </div>
+          <span id="identity-count" class="pill"></span>
+        </div>
+        <p class="section-copy">
+          ERXL compares formula semantics with financial identities and competing
+          hypotheses. This can detect a formula that is copied consistently across
+          every period but uses the wrong economic driver.
+        </p>
+        <div id="identity-assessments"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div>
             <div class="eyebrow">Counterfactual Synthesis</div>
-            <h2>Generated tests</h2>
+            <h2>Generated and executed tests</h2>
           </div>
           <span id="test-count" class="pill"></span>
         </div>
         <p class="section-copy">
-          These are test plans, not executed results. Each test changes one recognized
-          assumption and targets an output connected by the workbook's formula graph.
+          Each test changes one recognized assumption and targets a connected output.
+          ERXL executes supported tests, scores materiality, and keeps unsupported
+          calculations explicit rather than guessing.
         </p>
         <div id="tests"></div>
       </section>
