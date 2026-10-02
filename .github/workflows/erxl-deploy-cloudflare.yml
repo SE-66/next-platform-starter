@@ -1,11 +1,6 @@
 name: Deploy ERXL to Cloudflare
 
 on:
-  push:
-    branches: [ERXL]
-    paths:
-      - "ERXL/**"
-      - ".github/workflows/erxl-deploy-cloudflare.yml"
   workflow_dispatch:
 
 jobs:
