@@ -318,7 +318,76 @@ function detectBalanceSheetMismatch(workbook: XLSX.WorkBook): Finding[] {
   return findings;
 }
 
-function errorDisplayValue(cell: XLSX.CellObject): string | undefined {
+
+function detectSemanticDependencyOutliers(
+  semanticNodes: ReturnType<typeof inferSemanticNodes>
+): Finding[] {
+  const findings: Finding[] = [];
+  const semanticByKey = new Map(semanticNodes.map(node => [node.key, node]));
+  const groups = new Map<string, typeof semanticNodes>();
+
+  for (const node of semanticNodes) {
+    if (!node.formula) continue;
+    const groupKey = `${node.sheet}|${node.role}|${(node.label || "").toLowerCase()}`;
+    if (!groups.has(groupKey)) groups.set(groupKey, []);
+    groups.get(groupKey)!.push(node);
+  }
+
+  for (const nodes of groups.values()) {
+    if (nodes.length < 4) continue;
+
+    const signatures = new Map<string, number>();
+    const signatureByNode = new Map<string, string>();
+
+    for (const node of nodes) {
+      const roles = extractRefs(node.formula!, node.sheet)
+        .map(ref => semanticByKey.get(ref)?.role)
+        .filter((role): role is NonNullable<typeof role> => Boolean(role))
+        .filter(role => role !== "unknown");
+
+      const signature = [...new Set(roles)].sort().join("+") || "unresolved";
+      signatureByNode.set(node.id, signature);
+      signatures.set(signature, (signatures.get(signature) || 0) + 1);
+    }
+
+    const [modalSignature, modalCount] =
+      [...signatures.entries()].sort((a, b) => b[1] - a[1])[0] || [];
+
+    if (!modalSignature || modalSignature === "unresolved" || modalCount < 3) {
+      continue;
+    }
+
+    for (const node of nodes) {
+      const signature = signatureByNode.get(node.id) || "unresolved";
+      if (
+        signature !== "unresolved" &&
+        signature !== modalSignature &&
+        (signatures.get(signature) || 0) === 1
+      ) {
+        findings.push({
+          id: id("finding"),
+          severity: "high",
+          code: "SEMANTIC_DEPENDENCY_OUTLIER",
+          title: "Financial dependency pattern changes in one period",
+          sheet: node.sheet,
+          cell: node.cell,
+          details:
+            `This ${node.role} formula depends on financial roles [${signature}], while comparable periods primarily depend on [${modalSignature}].`,
+          evidence: {
+            role: node.role,
+            label: node.label,
+            observedDependencyRoles: signature.split("+"),
+            dominantDependencyRoles: modalSignature.split("+"),
+            formula: node.formula
+          }
+        });
+      }
+    }
+  }
+
+  return findings;
+}
+\nfunction errorDisplayValue(cell: XLSX.CellObject): string | undefined {
   if (typeof cell.v === "string" && ERROR_VALUES.has(cell.v.toUpperCase())) {
     return cell.v.toUpperCase();
   }
@@ -401,9 +470,11 @@ export function analyzeWorkbook(
     ...detectBalanceSheetMismatch(workbook)
   );
 
+  const semanticNodes = inferSemanticNodes(nodes);
+  findings.push(...detectSemanticDependencyOutliers(semanticNodes));
+
   findings.sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
 
-  const semanticNodes = inferSemanticNodes(nodes);
   const dependencyGraph = buildForwardDependencyGraph(nodes, extractRefs);
   const counterfactualTests = synthesizeCounterfactualTests(
     semanticNodes,
