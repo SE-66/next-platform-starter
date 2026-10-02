@@ -16,6 +16,7 @@ Apply migrations in this order:
 ERXL/supabase/migrations/001_initial_schema.sql
 ERXL/supabase/migrations/002_semantic_testing.sql
 ERXL/supabase/migrations/003_semantic_identity_reasoning.sql
+ERXL/supabase/migrations/004_semantic_violation_groups.sql
 ```
 
 Do not add public RLS policies unless the access model changes. The current browser never talks directly to the ERXL tables.
@@ -74,7 +75,7 @@ GET /api/health
 Expected service version:
 
 ```text
-0.3.0
+0.3.1
 ```
 
 Then upload a small `.xlsx` workbook in the browser.
