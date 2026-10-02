@@ -6,6 +6,7 @@ import {
   type SemanticCell
 } from "./semantics";
 import { executeCounterfactualTests } from "./counterfactual-executor";
+import { analyzeSemanticIdentities } from "./semantic-identities";
 import type { AnalysisResult, Finding, Severity } from "./types";
 
 const ERROR_VALUES = new Set([
@@ -540,6 +541,47 @@ export function analyzeWorkbook(
   const semanticNodes = inferSemanticNodes(nodes);
   findings.push(...detectSemanticDependencyOutliers(semanticNodes));
 
+  const identityAssessments = analyzeSemanticIdentities(
+    workbook,
+    semanticNodes,
+    extractRefs
+  );
+
+  for (const assessment of identityAssessments) {
+    if (assessment.status !== "violated") continue;
+
+    const materialityRank = assessment.materiality?.rank;
+    const severity: Severity =
+      materialityRank && materialityRank !== "unknown"
+        ? materialityRank
+        : assessment.confidence >= 0.85
+          ? "high"
+          : "medium";
+
+    findings.push({
+      id: id("finding"),
+      severity,
+      code: "SEMANTIC_IDENTITY_VIOLATION",
+      title: "Financial identity conflicts with formula semantics",
+      sheet: assessment.sheet,
+      cell: assessment.cell,
+      details:
+        assessment.explanation +
+        " Expected identity: " +
+        assessment.canonicalExpression +
+        ".",
+      evidence: {
+        identityAssessmentId: assessment.id,
+        identityName: assessment.identityName,
+        semanticExpression: assessment.semanticExpression,
+        observedRoles: assessment.observedRoles,
+        hypotheses: assessment.hypotheses,
+        rootCauseCandidates: assessment.rootCauseCandidates,
+        materiality: assessment.materiality
+      }
+    });
+  }
+
   const dependencyGraph = buildForwardDependencyGraph(nodes, extractRefs);
   const generatedTests = synthesizeCounterfactualTests(
     semanticNodes,
@@ -582,12 +624,60 @@ export function analyzeWorkbook(
         perturbedInput: test.perturbedInput,
         perturbedOutput: test.perturbedOutput,
         observedDirection: test.observedDirection,
-        dependencyPath: test.dependencyPath
+        dependencyPath: test.dependencyPath,
+        materiality: {
+          absoluteImpact: test.absoluteImpact,
+          relativeImpact: test.relativeImpact,
+          rank: test.materialityRank
+        },
+        rootCauseCandidates: (() => {
+          const path = new Set(test.dependencyPath);
+          const semanticCauses = identityAssessments
+            .filter(
+              assessment =>
+                assessment.status === "violated" &&
+                path.has(assessment.targetKey)
+            )
+            .flatMap(assessment => assessment.rootCauseCandidates);
+
+          if (semanticCauses.length) {
+            return semanticCauses.sort((a, b) => b.score - a.score);
+          }
+
+          const fallback: Array<{
+            cellKey: string;
+            score: number;
+            reason: string;
+          }> = [];
+
+          const prior = test.dependencyPath[test.dependencyPath.length - 2];
+          if (prior) {
+            fallback.push({
+              cellKey: prior,
+              score: 0.7,
+              reason:
+                "This is the last upstream formula before the failing output on the verified dependency path."
+            });
+          }
+
+          fallback.push({
+            cellKey: test.output.sheet + "!" + test.output.cell,
+            score: 0.5,
+            reason:
+              "This is the output formula where the counterfactual behavior becomes observable."
+          });
+
+          return fallback;
+        })()
       }
     });
   }
 
   findings.sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
+
+  const identityViolations = identityAssessments.filter(
+    assessment => assessment.status === "violated"
+  ).length;
 
   const testsPassed = counterfactualTests.filter(
     test => test.executionStatus === "passed"
@@ -609,6 +699,8 @@ export function analyzeWorkbook(
       formulaCells,
       findings: findings.length,
       semanticNodes: semanticNodes.length,
+      identityChecks: identityAssessments.length,
+      identityViolations,
       counterfactualTests: counterfactualTests.length,
       testsPassed,
       testsFailed,
@@ -616,6 +708,7 @@ export function analyzeWorkbook(
     },
     findings,
     semanticNodes,
+    identityAssessments,
     counterfactualTests
   };
 }
