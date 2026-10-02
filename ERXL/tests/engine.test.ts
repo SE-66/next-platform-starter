@@ -323,6 +323,16 @@ describe("ERXL v0.3 semantic identity reasoning", () => {
         hypothesis.matched
     )).toBe(true);
     expect(sample.materiality?.relativeImpact).toBeGreaterThan(1);
+
+    expect(result.identityViolationGroups).toHaveLength(1);
+    expect(result.identityViolationGroups[0].affectedRange).toBe("B5:F5");
+    expect(result.identityViolationGroups[0].affectedCount).toBe(5);
+
+    const semanticFindings = result.findings.filter(
+      finding => finding.code === "SEMANTIC_IDENTITY_VIOLATION"
+    );
+    expect(semanticFindings).toHaveLength(1);
+    expect(semanticFindings[0].cell).toBe("B5:F5");
   });
 
   it("detects a consistently copied rate-subtraction interest bug", () => {
@@ -341,5 +351,107 @@ describe("ERXL v0.3 semantic identity reasoning", () => {
           )
       )
     ).toBe(true);
+  });
+});
+
+
+function semanticEquityBridgeWorkbookBytes(): ArrayBuffer {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["Metric", "2027E", "2028E", "2029E", "2030E", "2031E"],
+    ["Revenue ($mm)", 500, 550, 600, 650, 700],
+    ["EBITDA ($mm)", 100, 110, 120, 130, 140],
+    ["Exit Multiple", 8, 8, 8, 8, 8],
+    ["Enterprise Value ($mm)", null, null, null, null, null],
+    ["Debt ($mm)", 300, 260, 220, 180, 140],
+    ["Cash ($mm)", 25, 30, 35, 40, 45],
+    ["Equity Value ($mm)", null, null, null, null, null]
+  ]);
+
+  for (const col of ["B", "C", "D", "E", "F"]) {
+    const ebitda = sheet[col + "3"]?.v as number;
+    const multiple = sheet[col + "4"]?.v as number;
+    const revenue = sheet[col + "2"]?.v as number;
+    const debt = sheet[col + "6"]?.v as number;
+
+    sheet[col + "5"] = {
+      t: "n",
+      f: col + "3*" + col + "4",
+      v: ebitda * multiple
+    };
+
+    // Deliberately wrong in every period: Revenue - Debt.
+    sheet[col + "8"] = {
+      t: "n",
+      f: col + "2-" + col + "6",
+      v: revenue - debt
+    };
+  }
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Valuation");
+
+  return XLSX.write(workbook, {
+    type: "array",
+    bookType: "xlsx"
+  }) as ArrayBuffer;
+}
+
+describe("ERXL v0.3.1 grouped semantic defects", () => {
+  it("conclusively detects Revenue - Debt as an equity-value driver substitution", () => {
+    const result = analyzeWorkbook(
+      semanticEquityBridgeWorkbookBytes(),
+      "semantic-equity.xlsx"
+    );
+
+    const violations = result.identityAssessments.filter(
+      assessment =>
+        assessment.targetRole === "equity_value" &&
+        assessment.status === "violated"
+    );
+
+    expect(violations).toHaveLength(5);
+    expect(
+      violations.every(assessment =>
+        assessment.semanticExpression.includes("@revenue-@debt")
+      )
+    ).toBe(true);
+
+    expect(
+      violations.every(assessment =>
+        assessment.hypotheses.some(
+          hypothesis =>
+            !hypothesis.canonical &&
+            hypothesis.name.includes("Revenue substituted") &&
+            hypothesis.matched
+        )
+      )
+    ).toBe(true);
+
+    const equityGroups = result.identityViolationGroups.filter(
+      group => group.targetRole === "equity_value"
+    );
+
+    expect(equityGroups).toHaveLength(1);
+    expect(equityGroups[0].affectedRange).toBe("B8:F8");
+    expect(equityGroups[0].affectedCount).toBe(5);
+    expect(equityGroups[0].worstMateriality?.rank).toBe("critical");
+
+    const equityFindings = result.findings.filter(
+      finding =>
+        finding.code === "SEMANTIC_IDENTITY_VIOLATION" &&
+        finding.sheet === "Valuation" &&
+        finding.cell === "B8:F8"
+    );
+
+    expect(equityFindings).toHaveLength(1);
+
+    expect(
+      result.findings.some(
+        finding =>
+          finding.code === "FORMULA_OUTLIER" &&
+          finding.sheet === "Valuation" &&
+          ["B8", "C8", "D8", "E8", "F8"].includes(finding.cell || "")
+      )
+    ).toBe(false);
   });
 });
