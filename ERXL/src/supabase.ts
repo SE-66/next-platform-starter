@@ -1,4 +1,8 @@
-import type { AnalysisResult } from "./types";
+import type {
+  AnalysisResult,
+  CounterfactualTest,
+  SemanticNode
+} from "./types";
 
 export interface SupabaseEnv {
   SUPABASE_URL?: string;
@@ -32,6 +36,47 @@ async function post(
   }
 }
 
+function semanticRows(runId: string, nodes: SemanticNode[]) {
+  return nodes.map(node => ({
+    id: node.id,
+    analysis_run_id: runId,
+    cell_key: node.key,
+    role: node.role,
+    sheet_name: node.sheet,
+    cell_address: node.cell,
+    label: node.label ?? null,
+    confidence: node.confidence,
+    scalar_value:
+      typeof node.value === "number" ? node.value : null,
+    text_value:
+      typeof node.value === "string" ? node.value : null,
+    formula: node.formula ?? null
+  }));
+}
+
+function testRows(runId: string, tests: CounterfactualTest[]) {
+  return tests.map(test => ({
+    id: test.id,
+    analysis_run_id: runId,
+    title: test.title,
+    input_semantic_node_id: test.input.semanticNodeId,
+    output_semantic_node_id: test.output.semanticNodeId,
+    input_role: test.input.role,
+    output_role: test.output.role,
+    input_sheet_name: test.input.sheet,
+    input_cell_address: test.input.cell,
+    output_sheet_name: test.output.sheet,
+    output_cell_address: test.output.cell,
+    baseline_value: test.input.baselineValue ?? null,
+    perturbation_percent: test.input.perturbationPercent,
+    expected_direction: test.output.expectedDirection,
+    dependency_path: test.dependencyPath,
+    confidence: test.confidence,
+    rationale: test.rationale,
+    execution_status: test.executionStatus
+  }));
+}
+
 export async function persistAnalysis(
   env: SupabaseEnv,
   result: AnalysisResult
@@ -63,6 +108,18 @@ export async function persistAnalysis(
         details: f.details,
         evidence: f.evidence ?? {}
       }))
+    );
+  }
+
+  if (result.semanticNodes.length) {
+    await post(env, "semantic_nodes", semanticRows(result.runId, result.semanticNodes));
+  }
+
+  if (result.counterfactualTests.length) {
+    await post(
+      env,
+      "counterfactual_tests",
+      testRows(result.runId, result.counterfactualTests)
     );
   }
 }
