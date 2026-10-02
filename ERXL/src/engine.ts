@@ -524,6 +524,16 @@ export function analyzeWorkbook(
 
   findings.sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
 
+  const testsPassed = counterfactualTests.filter(
+    test => test.executionStatus === "passed"
+  ).length;
+  const testsFailed = counterfactualTests.filter(
+    test => test.executionStatus === "failed"
+  ).length;
+  const testsUnsupported = counterfactualTests.filter(
+    test => test.executionStatus === "unsupported"
+  ).length;
+
   return {
     runId: id("run"),
     fileName,
@@ -534,7 +544,10 @@ export function analyzeWorkbook(
       formulaCells,
       findings: findings.length,
       semanticNodes: semanticNodes.length,
-      counterfactualTests: counterfactualTests.length
+      counterfactualTests: counterfactualTests.length,
+      testsPassed,
+      testsFailed,
+      testsUnsupported
     },
     findings,
     semanticNodes,
