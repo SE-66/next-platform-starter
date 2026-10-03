@@ -411,6 +411,85 @@ function ratioScaleAdjustment(
   return 0;
 }
 
+
+const SUBTRACTION_BASE_SCORE: Partial<Record<SemanticRole, number>> = {
+  revenue: 1,
+  enterprise_value: 0.96,
+  assets: 0.94,
+  gross_profit: 0.9,
+  ebitda: 0.84,
+  equity_value: 0.82,
+  debt: 0.72,
+  liabilities: 0.7,
+  cash: 0.62,
+  working_capital: 0.58,
+  cogs: 0.46,
+  sga: 0.38,
+  capex: 0.36,
+  interest_expense: 0.32,
+  taxes: 0.3
+};
+
+function subtractionOrientationAdjustment(
+  target: SemanticNode,
+  operator: HypothesisOperator,
+  sources: SemanticNode[]
+): number {
+  if (operator !== "subtract" || sources.length !== 2) return 0;
+
+  const [minuend, subtrahend] = sources;
+  if (
+    dimension(target.role) !== "money" ||
+    dimension(minuend.role) !== "money" ||
+    dimension(subtrahend.role) !== "money"
+  ) {
+    return 0;
+  }
+
+  // Subtraction is directional. In financial bridges, the left-hand amount
+  // is commonly the broader/base amount and the right-hand amount a component
+  // being removed. This is a soft role hierarchy, not an exact identity rule.
+  const minuendBase = SUBTRACTION_BASE_SCORE[minuend.role] ?? 0.5;
+  const subtrahendBase = SUBTRACTION_BASE_SCORE[subtrahend.role] ?? 0.5;
+
+  return 0.09 * (minuendBase - subtrahendBase);
+}
+
+function subtractionScaleAdjustment(
+  target: SemanticNode,
+  operator: HypothesisOperator,
+  baselinePrediction: number,
+  evaluator: WorkbookEvaluator
+): number {
+  if (
+    operator !== "subtract" ||
+    dimension(target.role) !== "money" ||
+    !Number.isFinite(baselinePrediction)
+  ) {
+    return 0;
+  }
+
+  try {
+    const observed = evaluator.evaluateNumber(target.key);
+    if (!Number.isFinite(observed)) return 0;
+
+    // Sign agreement is only a soft sanity signal. It helps distinguish
+    // A-B from B-A when the workbook output is clearly positive/negative
+    // without making sign a universal accounting rule.
+    if (
+      Math.abs(observed) > 1e-9 &&
+      Math.abs(baselinePrediction) > 1e-9 &&
+      Math.sign(observed) !== Math.sign(baselinePrediction)
+    ) {
+      return -0.08;
+    }
+
+    return 0.015;
+  } catch {
+    return 0;
+  }
+}
+
 function operatorBonus(
   target: SemanticRole,
   operator: HypothesisOperator,
@@ -498,7 +577,8 @@ function hypothesisScore(
         0.12 * simplicityScore +
         0.05 * sameSheetScore +
         operatorBonus(target.role, operator, sources) +
-        ratioOrientationAdjustment(target, operator, sources)
+        ratioOrientationAdjustment(target, operator, sources) +
+        subtractionOrientationAdjustment(target, operator, sources)
     )
   );
 
@@ -605,7 +685,13 @@ function makeCandidate(
         Math.min(
           0.99,
           candidate.plausibilityScore +
-            ratioScaleAdjustment(target, operator, baselinePrediction)
+            ratioScaleAdjustment(target, operator, baselinePrediction) +
+            subtractionScaleAdjustment(
+              target,
+              operator,
+              baselinePrediction,
+              evaluator
+            )
         )
       ).toFixed(2)
     );
@@ -613,6 +699,11 @@ function makeCandidate(
     if (operator === "divide" && dimension(target.role) === "rate") {
       candidate.generationBasis +=
         " Ordered ratio orientation and scale sanity were included in ranking.";
+    }
+
+    if (operator === "subtract" && dimension(target.role) === "money") {
+      candidate.generationBasis +=
+        " Ordered subtraction orientation and sign sanity were included in ranking.";
     }
 
     return candidate;
@@ -1230,9 +1321,11 @@ export function runAutomaticHypothesisExperiments(
       plausibilityGap: Number(plausibilityGap.toFixed(2)),
       explanation: isAmbiguous
         ? "The perturbation did not separate the leading candidate hypotheses strongly enough."
-        : mismatch
-          ? "The workbook's observed response matches a lower-plausibility generated hypothesis more closely than ERXL's preferred hypothesis."
-          : "The workbook's observed response is consistent with the preferred generated hypothesis.",
+        : implemented?.id === preferred.id
+          ? "The workbook's observed response is consistent with the preferred generated hypothesis."
+          : mismatch
+            ? "The workbook's observed response matches a lower-plausibility generated hypothesis more closely than ERXL's preferred hypothesis."
+            : "The workbook's observed response matches an alternative generated hypothesis, but the plausibility gap is below ERXL's mismatch threshold; no mismatch finding was raised.",
       materiality
     });
   }
