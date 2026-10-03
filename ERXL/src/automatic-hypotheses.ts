@@ -1195,8 +1195,22 @@ export function runAutomaticHypothesisExperiments(
         Math.max(1e-6, candidate.plausibilityScore) ** 3
       )
     );
-    let posterior = [...priors];
-    const initialEntropy = entropy(posterior);
+
+    // Prior plausibility remains purely semantic/dimensional. Behavioral
+    // evidence begins here with the already-observed baseline target value,
+    // before any active intervention is selected.
+    const baselinePredictions = candidates.map(candidate =>
+      candidate.baselinePrediction ??
+      evaluateCandidate(candidate, byId, evaluator)
+    );
+    let posterior = updatePosterior(
+      priors,
+      baselinePredictions,
+      baselineTarget,
+      Math.max(Math.abs(baselineTarget), 1)
+    );
+
+    const initialEntropy = entropy(priors);
     const probes: NonNullable<HypothesisExperiment["probes"]> = [];
     const used = new Set<string>();
     let lastPredictions: HypothesisPrediction[] = [];
