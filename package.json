@@ -10,5 +10,11 @@
     "build": "npm --prefix ERXL install --ignore-scripts --no-audit --no-fund && npm --prefix ERXL run typecheck && npm --prefix ERXL test",
     "deploy": "npm run build && npx wrangler@4.147.0 deploy",
     "erxl:deploy": "npm run deploy"
+  },
+  "dependencies": {
+    "xlsx": "0.18.5"
+  },
+  "devDependencies": {
+    "wrangler": "4.147.0"
   }
 }
