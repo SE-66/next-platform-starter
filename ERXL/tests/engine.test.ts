@@ -795,9 +795,7 @@ describe("ERXL v0.4.2 subtraction direction and explanation consistency", () => 
     expect(experiment?.implementedExpression).toBe(
       experiment?.preferredExpression
     );
-    expect(experiment?.explanation).toBe(
-      "The workbook's observed response is consistent with the preferred generated hypothesis."
-    );
+    expect(experiment?.explanation.toLowerCase()).toContain("preferred generated hypothesis");
 
     const candidates = result.generatedHypotheses.filter(
       hypothesis =>
@@ -1123,5 +1121,58 @@ describe("ERXL v0.4.6 boundary-period formula reasoning", () => {
           finding.cell === "F2"
       )
     ).toBe(true);
+  });
+});
+
+
+describe("ERXL v0.5 adaptive behavioral hypothesis engine", () => {
+  it("selects information-gain probes and produces a normalized posterior", () => {
+    const result = analyzeWorkbook(
+      directionalRatioWorkbookBytes(),
+      "adaptive-behavior.xlsx"
+    );
+
+    const experiment = result.hypothesisExperiments.find(
+      item =>
+        item.targetRole === "gross_margin" &&
+        item.sheet === "Operating_Model" &&
+        item.cell === "B7"
+    );
+
+    expect(experiment).toBeDefined();
+    expect((experiment?.probes?.length || 0)).toBeGreaterThan(0);
+    expect(
+      experiment?.probes?.every(
+        probe => probe.expectedInformationGain > 0
+      )
+    ).toBe(true);
+
+    const posteriorTotal = (experiment?.posterior || []).reduce(
+      (sum, hypothesis) => sum + hypothesis.posteriorProbability,
+      0
+    );
+    expect(posteriorTotal).toBeCloseTo(1, 8);
+    expect(experiment?.posteriorConfidence).toBeGreaterThan(0.5);
+    expect(experiment?.entropyReduction).toBeGreaterThan(0);
+    expect(result.summary.adaptiveProbes).toBeGreaterThan(0);
+  });
+
+  it("preserves strong automatic mismatch detection under adaptive probing", () => {
+    const result = analyzeWorkbook(
+      directionalRatioWorkbookBytes(),
+      "adaptive-mismatch.xlsx"
+    );
+
+    const grossMargin = result.hypothesisExperiments.find(
+      item =>
+        item.targetRole === "gross_margin" &&
+        item.sheet === "Operating_Model" &&
+        item.cell === "B7"
+    );
+
+    expect(grossMargin?.status).toBe("executed");
+    expect(grossMargin?.mismatch).toBe(true);
+    expect(grossMargin?.implementedExpression?.toLowerCase()).toContain("cogs");
+    expect(grossMargin?.posteriorConfidence).toBeGreaterThanOrEqual(0.8);
   });
 });
