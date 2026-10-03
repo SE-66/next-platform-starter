@@ -245,10 +245,17 @@ export interface WorkbookSummary {
   testsUnsupported: number;
 }
 
+export interface BuildProvenance {
+  version: string;
+  commit: string;
+  builtAt: string;
+}
+
 export interface AnalysisResult {
   runId: string;
   fileName: string;
   createdAt: string;
+  build?: BuildProvenance;
   summary: WorkbookSummary;
   findings: Finding[];
   semanticNodes: SemanticNode[];
