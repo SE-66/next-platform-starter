@@ -253,6 +253,7 @@ export interface WorkbookSummary {
   identityViolationGroups: number;
   generatedHypotheses: number;
   hypothesisExperiments: number;
+  hypothesisAbstentions: number;
   hypothesisMismatches: number;
   counterfactualTests: number;
   testsPassed: number;
