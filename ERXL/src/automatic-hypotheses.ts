@@ -4,6 +4,7 @@ import type {
   GeneratedHypothesis,
   HypothesisExperiment,
   HypothesisOperator,
+  HypothesisPrediction,
   MaterialityEstimate,
   SemanticNode,
   SemanticRole
