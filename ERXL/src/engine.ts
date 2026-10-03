@@ -1008,6 +1008,13 @@ export function analyzeWorkbook(
   const hypothesisMismatches = hypothesisExperiments.filter(
     experiment => experiment.mismatch
   ).length;
+  const adaptiveProbes = hypothesisExperiments.reduce(
+    (sum, experiment) => sum + (experiment.probes?.length || 0),
+    0
+  );
+  const multiProbeExperiments = hypothesisExperiments.filter(
+    experiment => (experiment.probes?.length || 0) > 1
+  ).length;
 
   const testsPassed = counterfactualTests.filter(
     test => test.executionStatus === "passed"
@@ -1038,6 +1045,8 @@ export function analyzeWorkbook(
         hypothesisExperiments.length - hypothesisAbstentions,
       hypothesisAbstentions,
       hypothesisMismatches,
+      adaptiveProbes,
+      multiProbeExperiments,
       counterfactualTests: counterfactualTests.length,
       testsPassed,
       testsFailed,
