@@ -338,8 +338,13 @@ form.addEventListener("submit", async event => {
     renderHypothesisExperiments(data.hypothesisExperiments || []);
     renderTests(data.counterfactualTests || []);
 
+    const build = data.build || {};
+    const buildText = build.version
+      ? ` · ERXL ${esc(build.version)} · commit <code>${esc(String(build.commit || "unknown").slice(0, 12))}</code> · built ${esc(build.builtAt || "unknown")}`
+      : "";
+
     runMeta.innerHTML =
-      `Run <code>${esc(data.runId)}</code> · storage: ${esc(data.persistence)} · ${esc(data.fileName)}`;
+      `Run <code>${esc(data.runId)}</code> · storage: ${esc(data.persistence)} · ${esc(data.fileName)}${buildText}`;
 
     resultsEl.classList.remove("hidden");
     statusEl.textContent = "Analysis complete.";
