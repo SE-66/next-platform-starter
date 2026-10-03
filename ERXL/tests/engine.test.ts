@@ -1176,3 +1176,28 @@ describe("ERXL v0.5 adaptive behavioral hypothesis engine", () => {
     expect(grossMargin?.posteriorConfidence).toBeGreaterThanOrEqual(0.8);
   });
 });
+
+
+describe("ERXL v0.5.1 posterior-fit consistency", () => {
+  it("never reports identified when the best behavioral fit is above the ambiguity threshold", () => {
+    const result = analyzeWorkbook(
+      semanticIdentityWorkbookBytes(),
+      "poor-fit-consistency.xlsx"
+    );
+
+    for (const experiment of result.hypothesisExperiments) {
+      if (!experiment.predictions?.length) continue;
+
+      const implemented = experiment.predictions.find(
+        prediction => prediction.hypothesisId === experiment.implementedHypothesisId
+      );
+      const error = implemented?.normalizedError;
+
+      if (error !== undefined && error > 0.12) {
+        expect(experiment.status).toBe("ambiguous");
+        expect(experiment.stopReason).toBe("poor_fit");
+        expect(experiment.mismatch).toBe(false);
+      }
+    }
+  });
+});
