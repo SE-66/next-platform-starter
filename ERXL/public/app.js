@@ -72,7 +72,13 @@ function renderFindings(findings) {
       : [];
     const materiality = evidence.materiality || null;
     const topCause = causes[0];
-    const detectors = Array.isArray(finding.detectorCodes)\n      ? finding.detectorCodes\n      : finding.code\n        ? [finding.code]\n        : [];\n\n    return `
+    const detectors = Array.isArray(finding.detectorCodes)
+      ? finding.detectorCodes
+      : finding.code
+        ? [finding.code]
+        : [];
+
+    return `
       <article class="finding">
         <div class="severity ${esc(finding.severity)}">${esc(finding.severity)}</div>
         <h3>${esc(finding.title)}</h3>
@@ -215,7 +221,11 @@ function renderIdentities(assessments, groups) {
 
 
 function renderHypothesisExperiments(experiments) {
-  const mismatches = experiments.filter(item => item.mismatch);\n  const abstentions = experiments.filter(item => item.status === "abstained");\n  const executed = experiments.length - abstentions.length;\n  hypothesisCount.textContent =\n    `${executed} experiments · ${abstentions.length} abstentions · ${mismatches.length} mismatches`;
+  const mismatches = experiments.filter(item => item.mismatch);
+  const abstentions = experiments.filter(item => item.status === "abstained");
+  const executed = experiments.length - abstentions.length;
+  hypothesisCount.textContent =
+    `${executed} experiments · ${abstentions.length} abstentions · ${mismatches.length} mismatches`;
 
   if (!experiments.length) {
     hypothesisEl.innerHTML =
@@ -225,7 +235,12 @@ function renderHypothesisExperiments(experiments) {
 
   hypothesisEl.innerHTML = experiments
     .slice()
-    .sort((a, b) =>\n      Number(b.mismatch) - Number(a.mismatch) ||\n      Number(a.status === "abstained") - Number(b.status === "abstained")\n    )\n    .filter((item, index) => item.status !== "abstained" || index < 16)\n    .slice(0, 60)
+    .sort((a, b) =>
+      Number(b.mismatch) - Number(a.mismatch) ||
+      Number(a.status === "abstained") - Number(b.status === "abstained")
+    )
+    .filter((item, index) => item.status !== "abstained" || index < 16)
+    .slice(0, 60)
     .map(item => {
       const perturbation = item.perturbation;
       const materiality = item.materiality;
@@ -238,7 +253,8 @@ function renderHypothesisExperiments(experiments) {
             ${item.mismatch ? "mismatch" : esc(item.status)}
           </div>
           <h3>${esc(item.targetRole)} · ${esc(item.sheet)}!${esc(item.cell)}</h3>
-          <p><strong>${item.status === "abstained" ? "Top candidate (not accepted as preferred)" : "Preferred generated hypothesis"}:</strong> ${esc(item.preferredExpression)}</p>\n          ${item.preferredPlausibilityScore === undefined ? "" : `<p class="meta">Prior plausibility: ${esc((Number(item.preferredPlausibilityScore) * 100).toFixed(1))}%</p>`}
+          <p><strong>${item.status === "abstained" ? "Top candidate (not accepted as preferred)" : "Preferred generated hypothesis"}:</strong> ${esc(item.preferredExpression)}</p>
+          ${item.preferredPlausibilityScore === undefined ? "" : `<p class="meta">Prior plausibility: ${esc((Number(item.preferredPlausibilityScore) * 100).toFixed(1))}%</p>`}
           <p><strong>Implemented behavior:</strong> ${esc(item.implementedExpression || "not resolved")}</p>
           <p>${esc(item.explanation)}</p>
           ${perturbation ? `
