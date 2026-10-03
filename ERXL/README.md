@@ -2,6 +2,35 @@
 
 ERXL is a financial-model error-finding, semantic-reasoning, and counterfactual-testing engine for Excel.
 
+## ERXL v0.4.2 — Subtraction Direction + Explanation Consistency
+
+v0.4.2 fixes two weaknesses exposed by Test 7.
+
+### Ordered subtraction reasoning
+
+Subtraction candidates are no longer ranked as if `A - B` and `B - A` were interchangeable.
+
+The ranker now adds:
+
+- a soft **base-amount vs component** hierarchy for money bridges;
+- ordered subtraction scoring that favors broader/base values on the left and deducted components on the right;
+- soft sign sanity to penalize reversed subtraction when it flips the sign of an otherwise clearly signed workbook output;
+- regression coverage requiring `Revenue - COGS` to outrank `COGS - Revenue` for Gross Profit.
+
+This is a generic operator-direction heuristic, not a hard-coded Gross Profit formula.
+
+### Experiment explanation consistency
+
+An experiment may identify an implemented hypothesis different from ERXL's preferred hypothesis without crossing the mismatch threshold.
+
+ERXL now reports that state explicitly:
+
+`The workbook's observed response matches an alternative generated hypothesis, but the plausibility gap is below ERXL's mismatch threshold; no mismatch finding was raised.`
+
+It can only say `consistent with the preferred generated hypothesis` when the implemented hypothesis ID actually equals the preferred hypothesis ID.
+
+Regression tests enforce that invariant across multiple benchmark workbooks.
+
 ## ERXL v0.4.1 — Directional Ratio Ranking
 
 v0.4.1 fixes the ratio-orientation weakness exposed by Test 6 without adding a hard-coded EBITDA-margin formula.
@@ -219,6 +248,8 @@ Regression coverage includes:
 - automatically generated enterprise-to-equity bridge hypotheses
 - Gross Margin discovery beyond the hand-authored identity library
 - directional ratio ranking for Gross Margin and EBITDA Margin
+- subtraction direction ranking for money bridges
+- experiment explanation consistency when implemented and preferred hypotheses differ
 
 ## Next research milestone
 
