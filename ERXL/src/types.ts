@@ -226,7 +226,7 @@ export interface HypothesisExperiment {
   posterior?: HypothesisPosterior[];
   posteriorConfidence?: number;
   entropyReduction?: number;
-  stopReason?: "identified" | "max_probes" | "no_informative_probe" | "abstained" | "unsupported";
+  stopReason?: "identified" | "poor_fit" | "max_probes" | "no_informative_probe" | "abstained" | "unsupported";
   status: "executed" | "ambiguous" | "unsupported" | "abstained";
   preferredPlausibilityScore?: number;
   mismatch: boolean;
