@@ -902,58 +902,118 @@ function rankMateriality(relative?: number): MaterialityEstimate["rank"] {
   return "low";
 }
 
-function chooseDiscriminatingPerturbation(
+function normalizeProbabilities(values: number[]): number[] {
+  const safe = values.map(value => Number.isFinite(value) && value > 0 ? value : 0);
+  const total = safe.reduce((sum, value) => sum + value, 0);
+  if (total <= 0) return safe.map(() => 1 / Math.max(1, safe.length));
+  return safe.map(value => value / total);
+}
+
+function entropy(probabilities: number[]): number {
+  return probabilities.reduce(
+    (sum, probability) =>
+      probability > 0 ? sum - probability * Math.log2(probability) : sum,
+    0
+  );
+}
+
+function likelihood(
+  observed: number,
+  predicted: number,
+  scale: number
+): number {
+  const sigma = Math.max(Math.abs(scale) * 0.01, 1e-6);
+  const z = (observed - predicted) / sigma;
+  return Math.exp(-0.5 * z * z);
+}
+
+function updatePosterior(
+  prior: number[],
+  predicted: number[],
+  observed: number,
+  scale: number
+): number[] {
+  return normalizeProbabilities(
+    prior.map((probability, index) =>
+      probability * likelihood(observed, predicted[index], scale)
+    )
+  );
+}
+
+function expectedInformationGain(
+  prior: number[],
+  predicted: number[],
+  scale: number
+): number {
+  if (predicted.length < 2) return 0;
+  const before = entropy(prior);
+  let expectedAfter = 0;
+
+  for (let i = 0; i < predicted.length; i++) {
+    const posterior = updatePosterior(prior, predicted, predicted[i], scale);
+    expectedAfter += prior[i] * entropy(posterior);
+  }
+
+  return Math.max(0, before - expectedAfter);
+}
+
+function chooseAdaptiveProbe(
   target: SemanticNode,
   candidates: GeneratedHypothesis[],
   byId: Map<string, SemanticNode>,
   evaluator: WorkbookEvaluator,
-  baselineTarget: number
+  posterior: number[],
+  baselineTarget: number,
+  used: Set<string>
 ):
   | {
       node: SemanticNode;
       baselineValue: number;
       perturbationPercent: number;
       perturbedValue: number;
+      expectedInformationGain: number;
+      predictions: number[];
     }
   | undefined {
   const sourceIds = [
     ...new Set(candidates.flatMap(candidate => candidate.sourceNodeIds))
   ];
-  const percentages = [0.01, 0.02, 0.05, 0.1];
 
-  let fallback:
+  // Deterministic bounded search. v0.5 optimizes expected information gain
+  // over a continuous-like probe grid rather than accepting the first
+  // separating perturbation size.
+  const percentages = [
+    -0.1, -0.075, -0.05, -0.03, -0.02, -0.01,
+     0.01,  0.02,   0.03,  0.05,  0.075, 0.1
+  ];
+
+  let best:
     | {
         node: SemanticNode;
         baselineValue: number;
         perturbationPercent: number;
         perturbedValue: number;
-        separation: number;
+        expectedInformationGain: number;
+        predictions: number[];
       }
     | undefined;
 
-  for (const perturbationPercent of percentages) {
-    let bestAtThisSize:
-      | {
-          node: SemanticNode;
-          baselineValue: number;
-          perturbationPercent: number;
-          perturbedValue: number;
-          separation: number;
-        }
-      | undefined;
+  for (const sourceId of sourceIds) {
+    const node = byId.get(sourceId);
+    if (!node || node.key === target.key) continue;
 
-    for (const sourceId of sourceIds) {
-      const node = byId.get(sourceId);
-      if (!node || node.key === target.key) continue;
+    let baselineValue: number;
+    try {
+      baselineValue = evaluator.evaluateNumber(node.key);
+    } catch {
+      continue;
+    }
 
-      let baselineValue: number;
-      try {
-        baselineValue = evaluator.evaluateNumber(node.key);
-      } catch {
-        continue;
-      }
+    if (!Number.isFinite(baselineValue)) continue;
 
-      if (!Number.isFinite(baselineValue)) continue;
+    for (const perturbationPercent of percentages) {
+      const signature = node.key + "|" + perturbationPercent;
+      if (used.has(signature)) continue;
 
       const step =
         Math.abs(baselineValue) > 1e-9
@@ -962,49 +1022,57 @@ function chooseDiscriminatingPerturbation(
       const perturbedValue = baselineValue + step;
       const overrides = new Map<string, number>([[node.key, perturbedValue]]);
 
-      const deltas: number[] = [];
+      const predictions: number[] = [];
+      let valid = true;
+
       for (const candidate of candidates) {
         try {
-          const baseline =
-            candidate.baselinePrediction ??
-            evaluateCandidate(candidate, byId, evaluator);
-          const perturbed = evaluateCandidate(
+          const predicted = evaluateCandidate(
             candidate,
             byId,
             evaluator,
             overrides
           );
-          deltas.push(perturbed - baseline);
+          if (!Number.isFinite(predicted)) {
+            valid = false;
+            break;
+          }
+          predictions.push(predicted);
         } catch {
-          // Candidate is simply omitted from this discriminating comparison.
+          valid = false;
+          break;
         }
       }
 
-      if (deltas.length < 2) continue;
-      const separation =
-        (Math.max(...deltas) - Math.min(...deltas)) /
-        Math.max(Math.abs(baselineTarget), 1);
+      if (!valid || predictions.length !== candidates.length) continue;
 
-      const item = {
-        node,
-        baselineValue,
-        perturbationPercent,
-        perturbedValue,
-        separation
-      };
+      const infoGain = expectedInformationGain(
+        posterior,
+        predictions,
+        Math.max(Math.abs(baselineTarget), 1)
+      );
 
-      if (!fallback || item.separation > fallback.separation) fallback = item;
-      if (!bestAtThisSize || item.separation > bestAtThisSize.separation) {
-        bestAtThisSize = item;
+      if (
+        !best ||
+        infoGain > best.expectedInformationGain + 1e-12 ||
+        (
+          Math.abs(infoGain - best.expectedInformationGain) <= 1e-12 &&
+          Math.abs(perturbationPercent) < Math.abs(best.perturbationPercent)
+        )
+      ) {
+        best = {
+          node,
+          baselineValue,
+          perturbationPercent,
+          perturbedValue,
+          expectedInformationGain: infoGain,
+          predictions
+        };
       }
-    }
-
-    if (bestAtThisSize && bestAtThisSize.separation >= 0.005) {
-      return bestAtThisSize;
     }
   }
 
-  return fallback;
+  return best && best.expectedInformationGain >= 0.01 ? best : undefined;
 }
 
 export function runAutomaticHypothesisExperiments(
@@ -1015,6 +1083,7 @@ export function runAutomaticHypothesisExperiments(
 ): HypothesisExperiment[] {
   const evaluator = new WorkbookEvaluator(workbook);
   const byId = new Map(nodes.map(node => [node.id, node]));
+  const byKey = new Map(nodes.map(node => [node.key, node]));
   const hypothesesByTarget = new Map<string, GeneratedHypothesis[]>();
 
   for (const hypothesis of hypotheses) {
@@ -1031,18 +1100,14 @@ export function runAutomaticHypothesisExperiments(
     if (!target || !target.formula) continue;
 
     const rankedCandidates = [...targetHypotheses].sort(compareHypotheses);
-
-    const byKey = new Map(nodes.map(node => [node.key, node]));
     const observedSemanticExpression = semanticizeObservedFormula(
       target.formula,
       target.sheet,
       byKey
     );
-
     const observedShapeCandidates = rankedCandidates.filter(
       candidate =>
-        candidate.semanticExpression.toLowerCase() ===
-        observedSemanticExpression
+        candidate.semanticExpression.toLowerCase() === observedSemanticExpression
     );
 
     const candidates = [
@@ -1058,21 +1123,32 @@ export function runAutomaticHypothesisExperiments(
     if (!candidates.length) continue;
 
     const preferred = candidates[0];
+    const common = {
+      id: id("hypothesis_experiment"),
+      targetNodeId: target.id,
+      targetKey: target.key,
+      targetRole: target.role,
+      sheet: target.sheet,
+      cell: target.cell,
+      candidateIds: candidates.map(candidate => candidate.id),
+      preferredHypothesisId: preferred.id,
+      preferredExpression: preferred.expression,
+      preferredPlausibilityScore: preferred.plausibilityScore
+    };
 
     if (preferred.plausibilityScore < MIN_PREFERRED_PRIOR) {
       experiments.push({
-        id: id("hypothesis_experiment"),
-        targetNodeId: target.id,
-        targetKey: target.key,
-        targetRole: target.role,
-        sheet: target.sheet,
-        cell: target.cell,
-        candidateIds: candidates.map(candidate => candidate.id),
-        preferredHypothesisId: preferred.id,
-        preferredExpression: preferred.expression,
-        preferredPlausibilityScore: preferred.plausibilityScore,
+        ...common,
         predictions: [],
+        probes: [],
+        posterior: candidates.map(candidate => ({
+          hypothesisId: candidate.id,
+          expression: candidate.expression,
+          priorProbability: 0,
+          posteriorProbability: 0
+        })),
         status: "abstained",
+        stopReason: "abstained",
         mismatch: false,
         explanation:
           "ERXL abstained because no generated hypothesis cleared the minimum prior-plausibility threshold."
@@ -1082,18 +1158,12 @@ export function runAutomaticHypothesisExperiments(
 
     if (candidates.length < 2) {
       experiments.push({
-        id: id("hypothesis_experiment"),
-        targetNodeId: target.id,
-        targetKey: target.key,
-        targetRole: target.role,
-        sheet: target.sheet,
-        cell: target.cell,
-        candidateIds: candidates.map(candidate => candidate.id),
-        preferredHypothesisId: preferred.id,
-        preferredExpression: preferred.expression,
-        preferredPlausibilityScore: preferred.plausibilityScore,
+        ...common,
         predictions: [],
+        probes: [],
+        posterior: [],
         status: "abstained",
+        stopReason: "abstained",
         mismatch: false,
         explanation:
           "ERXL abstained because only one sufficiently plausible candidate remained after pruning."
@@ -1102,189 +1172,148 @@ export function runAutomaticHypothesisExperiments(
     }
 
     let baselineTarget: number;
-
     try {
       baselineTarget = evaluator.evaluateNumber(target.key);
     } catch (error) {
       experiments.push({
-        id: id("hypothesis_experiment"),
-        targetNodeId: target.id,
-        targetKey: target.key,
-        targetRole: target.role,
-        sheet: target.sheet,
-        cell: target.cell,
-        candidateIds: candidates.map(candidate => candidate.id),
-        preferredHypothesisId: preferred.id,
-        preferredExpression: preferred.expression,
-        preferredPlausibilityScore: preferred.plausibilityScore,
+        ...common,
         predictions: [],
+        probes: [],
+        posterior: [],
         status: "unsupported",
+        stopReason: "unsupported",
         mismatch: false,
         explanation:
-          error instanceof Error
-            ? error.message
-            : "Target could not be evaluated."
+          error instanceof Error ? error.message : "Target could not be evaluated."
       });
       continue;
     }
 
-    const perturbation = chooseDiscriminatingPerturbation(
-      target,
-      candidates,
-      byId,
-      evaluator,
-      baselineTarget
+    const priors = normalizeProbabilities(
+      candidates.map(candidate =>
+        Math.max(1e-6, candidate.plausibilityScore) ** 3
+      )
     );
+    let posterior = [...priors];
+    const initialEntropy = entropy(posterior);
+    const probes: NonNullable<HypothesisExperiment["probes"]> = [];
+    const used = new Set<string>();
+    let lastPredictions: HypothesisPrediction[] = [];
+    let lastObservedTarget: number | undefined;
+    let stopReason: HypothesisExperiment["stopReason"] = "max_probes";
 
-    if (!perturbation) {
-      experiments.push({
-        id: id("hypothesis_experiment"),
-        targetNodeId: target.id,
-        targetKey: target.key,
-        targetRole: target.role,
-        sheet: target.sheet,
-        cell: target.cell,
-        candidateIds: candidates.map(candidate => candidate.id),
-        preferredHypothesisId: preferred.id,
-        preferredExpression: preferred.expression,
-        preferredPlausibilityScore: preferred.plausibilityScore,
+    for (let probeIndex = 0; probeIndex < 3; probeIndex++) {
+      const topBefore = Math.max(...posterior);
+      if (probeIndex > 0 && topBefore >= 0.92) {
+        stopReason = "identified";
+        break;
+      }
+
+      const probe = chooseAdaptiveProbe(
+        target,
+        candidates,
+        byId,
+        evaluator,
+        posterior,
         baselineTarget,
-        predictions: [],
-        status: "ambiguous",
-        mismatch: false,
-        explanation:
-          "ERXL generated competing hypotheses but could not find a perturbation that separates their predictions."
-      });
-      continue;
-    }
+        used
+      );
 
-    const overrides = new Map<string, number>([
-      [perturbation.node.key, perturbation.perturbedValue]
-    ]);
+      if (!probe) {
+        stopReason = probeIndex === 0 ? "no_informative_probe" : "identified";
+        break;
+      }
 
-    let observedTarget: number;
-    try {
-      observedTarget = evaluator.evaluateNumber(target.key, overrides);
-    } catch (error) {
-      experiments.push({
-        id: id("hypothesis_experiment"),
-        targetNodeId: target.id,
-        targetKey: target.key,
-        targetRole: target.role,
-        sheet: target.sheet,
-        cell: target.cell,
-        candidateIds: candidates.map(candidate => candidate.id),
-        preferredHypothesisId: preferred.id,
-        preferredExpression: preferred.expression,
-        preferredPlausibilityScore: preferred.plausibilityScore,
-        perturbation: {
-          semanticNodeId: perturbation.node.id,
-          key: perturbation.node.key,
-          role: perturbation.node.role,
-          baselineValue: perturbation.baselineValue,
-          perturbationPercent: perturbation.perturbationPercent,
-          perturbedValue: perturbation.perturbedValue
-        },
-        baselineTarget,
-        predictions: [],
-        status: "unsupported",
-        mismatch: false,
-        explanation:
-          error instanceof Error
-            ? error.message
-            : "The discriminating perturbation could not be executed."
-      });
-      continue;
-    }
+      used.add(probe.node.key + "|" + probe.perturbationPercent);
+      const overrides = new Map<string, number>([
+        [probe.node.key, probe.perturbedValue]
+      ]);
 
-    const predictions = candidates.map(candidate => {
+      let observedTarget: number;
       try {
+        observedTarget = evaluator.evaluateNumber(target.key, overrides);
+      } catch {
+        stopReason = "unsupported";
+        break;
+      }
+
+      lastObservedTarget = observedTarget;
+      lastPredictions = candidates.map((candidate, index) => {
+        const predicted = probe.predictions[index];
         const baseline =
           candidate.baselinePrediction ??
           evaluateCandidate(candidate, byId, evaluator);
-        const perturbed = evaluateCandidate(
-          candidate,
-          byId,
-          evaluator,
-          overrides
-        );
-        const normalizedError =
-          Math.abs(perturbed - observedTarget) /
-          Math.max(Math.abs(observedTarget), 1);
-
         return {
           hypothesisId: candidate.id,
           expression: candidate.expression,
           baseline,
-          perturbed,
-          delta: perturbed - baseline,
-          normalizedError
+          perturbed: predicted,
+          delta: predicted - baseline,
+          normalizedError:
+            Math.abs(predicted - observedTarget) /
+            Math.max(Math.abs(observedTarget), 1)
         };
-      } catch (error) {
-        return {
-          hypothesisId: candidate.id,
-          expression: candidate.expression,
-          error: error instanceof Error ? error.message : String(error)
-        };
-      }
-    });
+      });
 
-    const rankedMatches = predictions
-      .filter(
-        prediction =>
-          prediction.normalizedError !== undefined &&
-          Number.isFinite(prediction.normalizedError)
-      )
-      .sort(
-        (a, b) =>
-          (a.normalizedError as number) - (b.normalizedError as number)
+      posterior = updatePosterior(
+        posterior,
+        probe.predictions,
+        observedTarget,
+        Math.max(Math.abs(baselineTarget), 1)
       );
 
-    if (!rankedMatches.length) {
-      experiments.push({
-        id: id("hypothesis_experiment"),
-        targetNodeId: target.id,
-        targetKey: target.key,
-        targetRole: target.role,
-        sheet: target.sheet,
-        cell: target.cell,
-        candidateIds: candidates.map(candidate => candidate.id),
-        preferredHypothesisId: preferred.id,
-        preferredExpression: preferred.expression,
-        preferredPlausibilityScore: preferred.plausibilityScore,
-        perturbation: {
-          semanticNodeId: perturbation.node.id,
-          key: perturbation.node.key,
-          role: perturbation.node.role,
-          baselineValue: perturbation.baselineValue,
-          perturbationPercent: perturbation.perturbationPercent,
-          perturbedValue: perturbation.perturbedValue
-        },
-        baselineTarget,
+      probes.push({
+        semanticNodeId: probe.node.id,
+        key: probe.node.key,
+        role: probe.node.role,
+        baselineValue: probe.baselineValue,
+        perturbationPercent: probe.perturbationPercent,
+        perturbedValue: probe.perturbedValue,
+        expectedInformationGain: probe.expectedInformationGain,
         observedTarget,
-        predictions,
-        status: "unsupported",
-        mismatch: false,
-        explanation:
-          "Candidate predictions could not be evaluated under the discriminating perturbation."
+        predictedTargets: candidates.map((candidate, index) => ({
+          hypothesisId: candidate.id,
+          predictedTarget: probe.predictions[index]
+        }))
       });
-      continue;
+
+      const topAfter = Math.max(...posterior);
+      const rankedPosterior = [...posterior].sort((a, b) => b - a);
+      const margin = topAfter - (rankedPosterior[1] ?? 0);
+
+      if (topAfter >= 0.92 && margin >= 0.2) {
+        stopReason = "identified";
+        break;
+      }
     }
 
-    const bestMatch = rankedMatches[0];
-    const secondMatch = rankedMatches[1];
-    const implemented = candidates.find(
-      candidate => candidate.id === bestMatch.hypothesisId
-    );
-    const bestError = bestMatch.normalizedError as number;
-    const secondError =
-      secondMatch?.normalizedError === undefined
-        ? Number.POSITIVE_INFINITY
-        : (secondMatch.normalizedError as number);
+    const posteriorRows = candidates
+      .map((candidate, index) => ({
+        hypothesisId: candidate.id,
+        expression: candidate.expression,
+        priorProbability: priors[index],
+        posteriorProbability: posterior[index]
+      }))
+      .sort((a, b) => b.posteriorProbability - a.posteriorProbability);
 
+    const bestPosterior = posteriorRows[0];
+    const implemented = candidates.find(
+      candidate => candidate.id === bestPosterior?.hypothesisId
+    );
+    const posteriorConfidence = bestPosterior?.posteriorProbability ?? 0;
+    const entropyReduction = Math.max(0, initialEntropy - entropy(posterior));
+
+    const bestPrediction = lastPredictions.find(
+      prediction => prediction.hypothesisId === implemented?.id
+    );
+    const bestError = bestPrediction?.normalizedError ?? Number.POSITIVE_INFINITY;
+    const secondPosterior = posteriorRows[1]?.posteriorProbability ?? 0;
     const isAmbiguous =
+      !implemented ||
+      posteriorConfidence < 0.75 ||
+      posteriorConfidence - secondPosterior < 0.15 ||
       bestError > 0.12 ||
-      (Number.isFinite(secondError) && secondError - bestError < 0.02);
+      probes.length === 0;
 
     const plausibilityGap = implemented
       ? preferred.plausibilityScore - implemented.plausibilityScore
@@ -1292,8 +1321,8 @@ export function runAutomaticHypothesisExperiments(
 
     const mismatch =
       !isAmbiguous &&
-      Boolean(implemented) &&
       implemented!.id !== preferred.id &&
+      posteriorConfidence >= 0.8 &&
       bestError <= 0.08 &&
       plausibilityGap >= 0.08;
 
@@ -1315,53 +1344,64 @@ export function runAutomaticHypothesisExperiments(
             rank: rankMateriality(relativeImpact)
           };
 
-    const status: HypothesisExperiment["status"] = isAmbiguous
-      ? "ambiguous"
-      : "executed";
+    const status: HypothesisExperiment["status"] =
+      stopReason === "unsupported"
+        ? "unsupported"
+        : isAmbiguous
+          ? "ambiguous"
+          : "executed";
+
+    const firstProbe = probes[0];
 
     experiments.push({
-      id: id("hypothesis_experiment"),
-      targetNodeId: target.id,
-      targetKey: target.key,
-      targetRole: target.role,
-      sheet: target.sheet,
-      cell: target.cell,
-      candidateIds: candidates.map(candidate => candidate.id),
-      preferredHypothesisId: preferred.id,
+      ...common,
       implementedHypothesisId: implemented?.id,
-      preferredExpression: preferred.expression,
-      preferredPlausibilityScore: preferred.plausibilityScore,
       implementedExpression: implemented?.expression,
-      perturbation: {
-        semanticNodeId: perturbation.node.id,
-        key: perturbation.node.key,
-        role: perturbation.node.role,
-        baselineValue: perturbation.baselineValue,
-        perturbationPercent: perturbation.perturbationPercent,
-        perturbedValue: perturbation.perturbedValue
-      },
+      perturbation: firstProbe
+        ? {
+            semanticNodeId: firstProbe.semanticNodeId,
+            key: firstProbe.key,
+            role: firstProbe.role,
+            baselineValue: firstProbe.baselineValue,
+            perturbationPercent: firstProbe.perturbationPercent,
+            perturbedValue: firstProbe.perturbedValue
+          }
+        : undefined,
       baselineTarget,
-      observedTarget,
-      predictions,
+      observedTarget: lastObservedTarget,
+      predictions: lastPredictions,
+      probes,
+      posterior: posteriorRows,
+      posteriorConfidence,
+      entropyReduction,
+      stopReason,
       status,
       mismatch,
       implementedMatchScore: Number(
-        Math.max(0, 1 - Math.min(bestError, 1)).toFixed(2)
+        Math.max(0, Math.min(1, posteriorConfidence)).toFixed(4)
       ),
-      plausibilityGap: Number(plausibilityGap.toFixed(2)),
-      explanation: isAmbiguous
-        ? "The perturbation did not separate the leading candidate hypotheses strongly enough."
-        : implemented?.id === preferred.id
-          ? "The workbook's observed response is consistent with the preferred generated hypothesis."
-          : mismatch
-            ? "The workbook's observed response matches a lower-plausibility generated hypothesis more closely than ERXL's preferred hypothesis."
-            : "The workbook's observed response matches an alternative generated hypothesis, but the plausibility gap is below ERXL's mismatch threshold; no mismatch finding was raised.",
+      plausibilityGap: Number(plausibilityGap.toFixed(4)),
+      explanation:
+        stopReason === "unsupported"
+          ? "ERXL could not execute one of the adaptive behavioral probes."
+          : probes.length === 0
+            ? "ERXL generated competing hypotheses but found no probe with enough expected information gain."
+            : isAmbiguous
+              ? "Adaptive probing reduced uncertainty, but the posterior evidence was not strong enough to identify one implemented hypothesis conclusively."
+              : implemented?.id === preferred.id
+                ? "Adaptive behavioral probing identified the preferred generated hypothesis as the workbook's implemented behavior."
+                : mismatch
+                  ? "Adaptive behavioral probing identified a lower-prior hypothesis as the workbook's implemented behavior with high posterior confidence."
+                  : "Adaptive behavioral probing identified an alternative hypothesis, but the prior-plausibility gap is below ERXL's mismatch threshold.",
       materiality
     });
   }
 
   return experiments.sort((a, b) => {
     if (a.mismatch !== b.mismatch) return a.mismatch ? -1 : 1;
+    const aConfidence = a.posteriorConfidence || 0;
+    const bConfidence = b.posteriorConfidence || 0;
+    if (aConfidence !== bConfidence) return bConfidence - aConfidence;
     const aMateriality = a.materiality?.relativeImpact || 0;
     const bMateriality = b.materiality?.relativeImpact || 0;
     return bMateriality - aMateriality;
