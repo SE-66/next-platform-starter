@@ -455,41 +455,6 @@ function subtractionOrientationAdjustment(
   return 0.09 * (minuendBase - subtrahendBase);
 }
 
-function subtractionScaleAdjustment(
-  target: SemanticNode,
-  operator: HypothesisOperator,
-  baselinePrediction: number,
-  evaluator: WorkbookEvaluator
-): number {
-  if (
-    operator !== "subtract" ||
-    dimension(target.role) !== "money" ||
-    !Number.isFinite(baselinePrediction)
-  ) {
-    return 0;
-  }
-
-  try {
-    const observed = evaluator.evaluateNumber(target.key);
-    if (!Number.isFinite(observed)) return 0;
-
-    // Sign agreement is only a soft sanity signal. It helps distinguish
-    // A-B from B-A when the workbook output is clearly positive/negative
-    // without making sign a universal accounting rule.
-    if (
-      Math.abs(observed) > 1e-9 &&
-      Math.abs(baselinePrediction) > 1e-9 &&
-      Math.sign(observed) !== Math.sign(baselinePrediction)
-    ) {
-      return -0.08;
-    }
-
-    return 0.015;
-  } catch {
-    return 0;
-  }
-}
-
 function operatorBonus(
   target: SemanticRole,
   operator: HypothesisOperator,
@@ -663,9 +628,9 @@ function makeCandidate(
     sourceKeys: sources.map(source => source.key),
     sourceRoles: sources.map(source => source.role),
     dimensionalScore: scored.dimensionalScore,
-    semanticAffinityScore: Number(scored.semanticAffinityScore.toFixed(2)),
+    semanticAffinityScore: scored.semanticAffinityScore,
     simplicityScore: scored.simplicityScore,
-    plausibilityScore: Number(scored.plausibilityScore.toFixed(2)),
+    plausibilityScore: scored.plausibilityScore,
     generationBasis: basis
   };
 
@@ -679,21 +644,13 @@ function makeCandidate(
     if (!Number.isFinite(baselinePrediction)) return undefined;
 
     candidate.baselinePrediction = baselinePrediction;
-    candidate.plausibilityScore = Number(
-      Math.max(
-        0,
-        Math.min(
-          0.99,
-          candidate.plausibilityScore +
-            ratioScaleAdjustment(target, operator, baselinePrediction) +
-            subtractionScaleAdjustment(
-              target,
-              operator,
-              baselinePrediction,
-              evaluator
-            )
-        )
-      ).toFixed(2)
+    candidate.plausibilityScore = Math.max(
+      0,
+      Math.min(
+        0.99,
+        candidate.plausibilityScore +
+          ratioScaleAdjustment(target, operator, baselinePrediction)
+      )
     );
 
     if (operator === "divide" && dimension(target.role) === "rate") {
@@ -703,7 +660,7 @@ function makeCandidate(
 
     if (operator === "subtract" && dimension(target.role) === "money") {
       candidate.generationBasis +=
-        " Ordered subtraction orientation and sign sanity were included in ranking.";
+        " Ordered subtraction orientation was included in prior ranking; observed target behavior is not used to score the prior.";
     }
 
     return candidate;
@@ -741,6 +698,30 @@ function numericPeers(
 
       return b.confidence - a.confidence;
     });
+}
+
+function compareHypotheses(
+  a: GeneratedHypothesis,
+  b: GeneratedHypothesis
+): number {
+  const scoreDelta = b.plausibilityScore - a.plausibilityScore;
+  if (Math.abs(scoreDelta) > 1e-12) return scoreDelta;
+
+  const affinityDelta = b.semanticAffinityScore - a.semanticAffinityScore;
+  if (Math.abs(affinityDelta) > 1e-12) return affinityDelta;
+
+  const simplicityDelta = b.simplicityScore - a.simplicityScore;
+  if (Math.abs(simplicityDelta) > 1e-12) return simplicityDelta;
+
+  const sourceCountDelta = a.sourceNodeIds.length - b.sourceNodeIds.length;
+  if (sourceCountDelta) return sourceCountDelta;
+
+  const semanticDelta = a.semanticExpression.localeCompare(
+    b.semanticExpression
+  );
+  if (semanticDelta) return semanticDelta;
+
+  return a.expression.localeCompare(b.expression);
 }
 
 export function generateAutomaticHypotheses(
@@ -877,12 +858,7 @@ export function generateAutomaticHypotheses(
       }
     }
 
-    const fullyRanked = [...candidates.values()]
-      .sort((a, b) => {
-        const scoreDelta = b.plausibilityScore - a.plausibilityScore;
-        if (scoreDelta) return scoreDelta;
-        return a.sourceNodeIds.length - b.sourceNodeIds.length;
-      });
+    const fullyRanked = [...candidates.values()].sort(compareHypotheses);
 
     const observedSemanticExpression = semanticizeObservedFormula(
       target.formula,
@@ -1047,8 +1023,7 @@ export function runAutomaticHypothesisExperiments(
     const target = byId.get(targetNodeId);
     if (!target || !target.formula) continue;
 
-    const rankedCandidates = [...targetHypotheses]
-      .sort((a, b) => b.plausibilityScore - a.plausibilityScore);
+    const rankedCandidates = [...targetHypotheses].sort(compareHypotheses);
 
     const byKey = new Map(nodes.map(node => [node.key, node]));
     const observedSemanticExpression = semanticizeObservedFormula(
