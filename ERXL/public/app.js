@@ -246,6 +246,10 @@ function renderHypothesisExperiments(experiments) {
       const materiality = item.materiality;
       const prediction = (item.predictions || [])
         .find(pred => pred.hypothesisId === item.implementedHypothesisId);
+      const posterior = (item.posterior || [])
+        .slice()
+        .sort((a, b) => Number(b.posteriorProbability) - Number(a.posteriorProbability));
+      const probes = item.probes || [];
 
       return `
         <article class="finding">
@@ -257,6 +261,24 @@ function renderHypothesisExperiments(experiments) {
           ${item.preferredPlausibilityScore === undefined ? "" : `<p class="meta">Prior plausibility: ${esc((Number(item.preferredPlausibilityScore) * 100).toFixed(1))}%</p>`}
           <p><strong>Implemented behavior:</strong> ${esc(item.implementedExpression || "not resolved")}</p>
           <p>${esc(item.explanation)}</p>
+          ${item.posteriorConfidence === undefined ? "" : `
+            <div class="meta">
+              Behavioral confidence: ${esc((Number(item.posteriorConfidence) * 100).toFixed(1))}%
+              ${item.entropyReduction === undefined ? "" : " · uncertainty reduced by " + esc(Number(item.entropyReduction).toFixed(2)) + " bits"}
+              ${item.stopReason ? " · stop: " + esc(item.stopReason) : ""}
+            </div>
+          `}
+          ${posterior.length ? `
+            <div class="meta">
+              Posterior: ${posterior.slice(0, 3).map(h => esc(h.expression) + " " + esc((Number(h.posteriorProbability) * 100).toFixed(1)) + "%").join(" · ")}
+            </div>
+          ` : ""}
+          ${probes.length ? `
+            <div class="meta">
+              Adaptive probes: ${esc(probes.length)}
+              ${probes.map((probe, index) => " · #" + (index + 1) + " " + esc(probe.key) + " " + esc((Number(probe.perturbationPercent) * 100).toFixed(1)) + "% (IG " + esc(Number(probe.expectedInformationGain).toFixed(2)) + " bits)").join("")}
+            </div>
+          ` : ""}
           ${perturbation ? `
             <div class="meta">
               Discriminating perturbation:
