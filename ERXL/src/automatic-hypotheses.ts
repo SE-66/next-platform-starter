@@ -1345,9 +1345,17 @@ export function runAutomaticHypothesisExperiments(
     const secondError =
       secondBehavior?.averageError ?? Number.POSITIVE_INFINITY;
 
+    const poorFit = bestError > 0.12;
+
+    if (poorFit && stopReason !== "unsupported") {
+      stopReason = "poor_fit";
+    } else if (!poorFit && stopReason === "max_probes" && posteriorConfidence >= 0.75) {
+      stopReason = "identified";
+    }
+
     const isAmbiguous =
       !implemented ||
-      bestError > 0.12 ||
+      poorFit ||
       (
         Number.isFinite(secondError) &&
         secondError - bestError < 0.015 &&
@@ -1426,8 +1434,10 @@ export function runAutomaticHypothesisExperiments(
           ? "ERXL could not execute one of the adaptive behavioral probes."
           : probes.length === 0
             ? "ERXL generated competing hypotheses but found no probe with enough expected information gain."
-            : isAmbiguous
-              ? "Adaptive probing reduced uncertainty, but the posterior evidence was not strong enough to identify one implemented hypothesis conclusively."
+            : stopReason === "poor_fit"
+              ? "The posterior concentrated on one candidate, but that candidate does not reproduce the workbook behavior closely enough; ERXL therefore keeps the result ambiguous."
+              : isAmbiguous
+                ? "Adaptive probing reduced uncertainty, but the posterior evidence was not strong enough to identify one implemented hypothesis conclusively."
               : implemented?.id === preferred.id
                 ? "Adaptive behavioral probing identified the preferred generated hypothesis as the workbook's implemented behavior."
                 : mismatch
