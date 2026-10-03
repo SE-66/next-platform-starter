@@ -859,3 +859,104 @@ describe("ERXL v0.4.2 subtraction direction and explanation consistency", () => 
     }
   });
 });
+
+
+function reversedGrossProfitWorkbookBytes(): ArrayBuffer {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["Metric", "2027E", "2028E", "2029E"],
+    ["Revenue ($mm)", 500, 550, 605],
+    ["COGS ($mm)", 300, 327, 356],
+    ["Gross Profit ($mm)", null, null, null]
+  ]);
+
+  for (const col of ["B", "C", "D"]) {
+    const revenue = sheet[col + "2"]?.v as number;
+    const cogs = sheet[col + "3"]?.v as number;
+
+    // Deliberately reversed implementation. The prior must still prefer
+    // Revenue - COGS without using the observed target sign as evidence.
+    sheet[col + "4"] = {
+      t: "n",
+      f: col + "3-" + col + "2",
+      v: cogs - revenue
+    };
+  }
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Operating_Model");
+
+  return XLSX.write(workbook, {
+    type: "array",
+    bookType: "xlsx"
+  }) as ArrayBuffer;
+}
+
+describe("ERXL v0.4.3 prior ranking isolation and precision", () => {
+  it("keeps prior subtraction ranking independent of implemented target sign", () => {
+    const result = analyzeWorkbook(
+      reversedGrossProfitWorkbookBytes(),
+      "prior-isolation.xlsx"
+    );
+
+    const experiment = result.hypothesisExperiments.find(
+      item =>
+        item.targetRole === "gross_profit" &&
+        item.sheet === "Operating_Model" &&
+        item.cell === "B4"
+    );
+
+    expect(experiment).toBeDefined();
+    expect(experiment?.preferredExpression).toContain("Revenue ($mm) − COGS ($mm)");
+    expect(experiment?.implementedExpression).toContain("COGS ($mm) − Revenue ($mm)");
+    expect(experiment?.preferredHypothesisId).not.toBe(
+      experiment?.implementedHypothesisId
+    );
+
+    const candidates = result.generatedHypotheses.filter(
+      hypothesis =>
+        hypothesis.targetRole === "gross_profit" &&
+        hypothesis.sheet === "Operating_Model" &&
+        hypothesis.cell === "B4" &&
+        hypothesis.operator === "subtract"
+    );
+
+    const preferredPrior = candidates.find(
+      hypothesis => hypothesis.semanticExpression === "@revenue-@cogs"
+    );
+    const implementedPrior = candidates.find(
+      hypothesis => hypothesis.semanticExpression === "@cogs-@revenue"
+    );
+
+    expect(preferredPrior).toBeDefined();
+    expect(implementedPrior).toBeDefined();
+    expect(preferredPrior!.plausibilityScore).toBeGreaterThan(
+      implementedPrior!.plausibilityScore
+    );
+    expect(preferredPrior!.generationBasis).toContain(
+      "observed target behavior is not used to score the prior"
+    );
+  });
+
+  it("preserves sub-percent score precision internally", () => {
+    const result = analyzeWorkbook(
+      directionalRatioWorkbookBytes(),
+      "score-precision.xlsx"
+    );
+
+    const inverse = result.generatedHypotheses.find(
+      hypothesis =>
+        hypothesis.targetRole === "ebitda_margin" &&
+        hypothesis.sheet === "Operating_Model" &&
+        hypothesis.cell === "B8" &&
+        hypothesis.semanticExpression === "@revenue/@ebitda"
+    );
+
+    expect(inverse).toBeDefined();
+    expect(
+      Math.abs(
+        inverse!.plausibilityScore * 100 -
+          Math.round(inverse!.plausibilityScore * 100)
+      )
+    ).toBeGreaterThan(1e-8);
+  });
+});
