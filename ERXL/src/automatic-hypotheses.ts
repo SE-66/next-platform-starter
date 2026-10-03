@@ -923,7 +923,7 @@ function likelihood(
   predicted: number,
   scale: number
 ): number {
-  const sigma = Math.max(Math.abs(scale) * 0.01, 1e-6);
+  const sigma = Math.max(Math.abs(scale) * 0.03, 1e-6);
   const z = (observed - predicted) / sigma;
   return Math.exp(-0.5 * z * z);
 }
@@ -1073,7 +1073,7 @@ function chooseAdaptiveProbe(
     }
   }
 
-  return best && best.expectedInformationGain >= 0.01 ? best : undefined;
+  return best && best.expectedInformationGain >= 0.002 ? best : undefined;
 }
 
 export function runAutomaticHypothesisExperiments(
@@ -1211,6 +1211,10 @@ export function runAutomaticHypothesisExperiments(
     );
 
     const initialEntropy = entropy(priors);
+    const evidenceErrors: number[][] = candidates.map((candidate, index) => [
+      Math.abs(baselinePredictions[index] - baselineTarget) /
+        Math.max(Math.abs(baselineTarget), 1)
+    ]);
     const probes: NonNullable<HypothesisExperiment["probes"]> = [];
     const used = new Set<string>();
     let lastPredictions: HypothesisPrediction[] = [];
@@ -1229,7 +1233,7 @@ export function runAutomaticHypothesisExperiments(
         candidates,
         byId,
         evaluator,
-        posterior,
+        probeIndex === 0 ? priors : posterior,
         baselineTarget,
         used
       );
@@ -1269,6 +1273,13 @@ export function runAutomaticHypothesisExperiments(
             Math.max(Math.abs(observedTarget), 1)
         };
       });
+
+      for (let index = 0; index < candidates.length; index++) {
+        evidenceErrors[index].push(
+          Math.abs(probe.predictions[index] - observedTarget) /
+            Math.max(Math.abs(observedTarget), 1)
+        );
+      }
 
       posterior = updatePosterior(
         posterior,
@@ -1311,23 +1322,37 @@ export function runAutomaticHypothesisExperiments(
       }))
       .sort((a, b) => b.posteriorProbability - a.posteriorProbability);
 
-    const bestPosterior = posteriorRows[0];
-    const implemented = candidates.find(
-      candidate => candidate.id === bestPosterior?.hypothesisId
-    );
-    const posteriorConfidence = bestPosterior?.posteriorProbability ?? 0;
-    const entropyReduction = Math.max(0, initialEntropy - entropy(posterior));
+    const behavioralRanking = candidates
+      .map((candidate, index) => ({
+        candidate,
+        averageError:
+          evidenceErrors[index].reduce((sum, error) => sum + error, 0) /
+          Math.max(1, evidenceErrors[index].length),
+        posteriorProbability: posterior[index]
+      }))
+      .sort(
+        (a, b) =>
+          a.averageError - b.averageError ||
+          b.posteriorProbability - a.posteriorProbability
+      );
 
-    const bestPrediction = lastPredictions.find(
-      prediction => prediction.hypothesisId === implemented?.id
-    );
-    const bestError = bestPrediction?.normalizedError ?? Number.POSITIVE_INFINITY;
-    const secondPosterior = posteriorRows[1]?.posteriorProbability ?? 0;
+    const bestBehavior = behavioralRanking[0];
+    const secondBehavior = behavioralRanking[1];
+    const implemented = bestBehavior?.candidate;
+    const posteriorConfidence = bestBehavior?.posteriorProbability ?? 0;
+    const entropyReduction = Math.max(0, initialEntropy - entropy(posterior));
+    const bestError = bestBehavior?.averageError ?? Number.POSITIVE_INFINITY;
+    const secondError =
+      secondBehavior?.averageError ?? Number.POSITIVE_INFINITY;
+
     const isAmbiguous =
       !implemented ||
-      posteriorConfidence < 0.75 ||
-      posteriorConfidence - secondPosterior < 0.15 ||
       bestError > 0.12 ||
+      (
+        Number.isFinite(secondError) &&
+        secondError - bestError < 0.015 &&
+        posteriorConfidence < 0.75
+      ) ||
       probes.length === 0;
 
     const plausibilityGap = implemented
@@ -1337,7 +1362,7 @@ export function runAutomaticHypothesisExperiments(
     const mismatch =
       !isAmbiguous &&
       implemented!.id !== preferred.id &&
-      posteriorConfidence >= 0.8 &&
+      posteriorConfidence >= 0.65 &&
       bestError <= 0.08 &&
       plausibilityGap >= 0.08;
 
