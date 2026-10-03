@@ -177,6 +177,28 @@ export interface HypothesisPrediction {
   error?: string;
 }
 
+export interface HypothesisPosterior {
+  hypothesisId: string;
+  expression: string;
+  priorProbability: number;
+  posteriorProbability: number;
+}
+
+export interface BehavioralProbe {
+  semanticNodeId: string;
+  key: string;
+  role: SemanticRole;
+  baselineValue: number;
+  perturbationPercent: number;
+  perturbedValue: number;
+  expectedInformationGain: number;
+  observedTarget?: number;
+  predictedTargets: Array<{
+    hypothesisId: string;
+    predictedTarget: number;
+  }>;
+}
+
 export interface HypothesisExperiment {
   id: string;
   targetNodeId: string;
@@ -200,6 +222,11 @@ export interface HypothesisExperiment {
   baselineTarget?: number;
   observedTarget?: number;
   predictions: HypothesisPrediction[];
+  probes?: BehavioralProbe[];
+  posterior?: HypothesisPosterior[];
+  posteriorConfidence?: number;
+  entropyReduction?: number;
+  stopReason?: "identified" | "max_probes" | "no_informative_probe" | "abstained" | "unsupported";
   status: "executed" | "ambiguous" | "unsupported" | "abstained";
   preferredPlausibilityScore?: number;
   mismatch: boolean;
@@ -255,6 +282,8 @@ export interface WorkbookSummary {
   hypothesisExperiments: number;
   hypothesisAbstentions: number;
   hypothesisMismatches: number;
+  adaptiveProbes: number;
+  multiProbeExperiments: number;
   counterfactualTests: number;
   testsPassed: number;
   testsFailed: number;
