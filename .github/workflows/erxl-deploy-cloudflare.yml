@@ -24,6 +24,18 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Stamp build provenance
+        shell: bash
+        run: |
+          BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          cat > ERXL/src/build-info.ts <<EOF
+          export const BUILD_INFO = {
+            version: "0.4.3",
+            commit: "${GITHUB_SHA}",
+            builtAt: "${BUILD_TIME}"
+          } as const;
+          EOF
+
       - name: Validate ERXL
         run: npm run build
 
