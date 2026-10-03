@@ -766,3 +766,96 @@ describe("ERXL v0.4.1 directional ratio ranking", () => {
     );
   });
 });
+
+
+describe("ERXL v0.4.2 subtraction direction and explanation consistency", () => {
+  it("prefers Revenue minus COGS over the reversed subtraction for Gross Profit", () => {
+    const result = analyzeWorkbook(
+      directionalRatioWorkbookBytes(),
+      "subtraction-direction.xlsx"
+    );
+
+    const experiment = result.hypothesisExperiments.find(
+      item =>
+        item.targetRole === "gross_profit" &&
+        item.sheet === "Operating_Model" &&
+        item.cell === "B5"
+    );
+
+    expect(experiment).toBeDefined();
+    expect(experiment?.status).toBe("executed");
+    expect(experiment?.mismatch).toBe(false);
+    expect(experiment?.preferredExpression.toLowerCase()).toContain("revenue");
+    expect(experiment?.preferredExpression.toLowerCase()).toContain("cogs");
+    expect(experiment?.preferredExpression.indexOf("Revenue")).toBeLessThan(
+      experiment?.preferredExpression.indexOf("COGS") ?? -1
+    );
+    expect(experiment?.implementedExpression).toBe(
+      experiment?.preferredExpression
+    );
+    expect(experiment?.explanation).toBe(
+      "The workbook's observed response is consistent with the preferred generated hypothesis."
+    );
+
+    const candidates = result.generatedHypotheses.filter(
+      hypothesis =>
+        hypothesis.targetRole === "gross_profit" &&
+        hypothesis.sheet === "Operating_Model" &&
+        hypothesis.cell === "B5" &&
+        hypothesis.operator === "subtract"
+    );
+
+    const correct = candidates.find(
+      hypothesis =>
+        hypothesis.semanticExpression === "@revenue-@cogs"
+    );
+    const reversed = candidates.find(
+      hypothesis =>
+        hypothesis.semanticExpression === "@cogs-@revenue"
+    );
+
+    expect(correct).toBeDefined();
+    expect(reversed).toBeDefined();
+    expect(correct!.plausibilityScore).toBeGreaterThan(
+      reversed!.plausibilityScore
+    );
+    expect(correct!.baselinePrediction).toBeGreaterThan(0);
+    expect(reversed!.baselinePrediction).toBeLessThan(0);
+  });
+
+  it("never describes a different implemented hypothesis as consistent with preferred", () => {
+    const workbooks = [
+      directionalRatioWorkbookBytes(),
+      semanticEquityBridgeWorkbookBytes(),
+      semanticIdentityWorkbookBytes()
+    ];
+
+    const experiments = workbooks.flatMap((bytes, index) =>
+      analyzeWorkbook(bytes, "explanation-consistency-" + index + ".xlsx")
+        .hypothesisExperiments
+    );
+
+    expect(experiments.length).toBeGreaterThan(0);
+
+    for (const experiment of experiments) {
+      if (
+        experiment.status === "executed" &&
+        experiment.implementedHypothesisId &&
+        experiment.implementedHypothesisId !== experiment.preferredHypothesisId
+      ) {
+        expect(experiment.explanation).not.toBe(
+          "The workbook's observed response is consistent with the preferred generated hypothesis."
+        );
+
+        if (!experiment.mismatch) {
+          expect(experiment.explanation.toLowerCase()).toContain(
+            "alternative generated hypothesis"
+          );
+          expect(experiment.explanation.toLowerCase()).toContain(
+            "below erxl's mismatch threshold"
+          );
+        }
+      }
+    }
+  });
+});
