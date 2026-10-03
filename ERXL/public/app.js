@@ -263,9 +263,9 @@ function renderHypothesisExperiments(experiments) {
           <p>${esc(item.explanation)}</p>
           ${item.posteriorConfidence === undefined ? "" : `
             <div class="meta">
-              Behavioral confidence: ${esc((Number(item.posteriorConfidence) * 100).toFixed(1))}%
+              Posterior concentration: ${esc((Number(item.posteriorConfidence) * 100).toFixed(1))}%
               ${item.entropyReduction === undefined ? "" : " · uncertainty reduced by " + esc(Number(item.entropyReduction).toFixed(2)) + " bits"}
-              ${item.stopReason ? " · stop: " + esc(item.stopReason) : ""}
+              ${item.stopReason ? " · stop: " + esc(item.stopReason) : ""}${item.stopReason === "poor_fit" ? " · behavioral fit rejected" : ""}
             </div>
           `}
           ${posterior.length ? `
