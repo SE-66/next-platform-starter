@@ -743,15 +743,18 @@ function parseRef(
 }
 
 export class WorkbookEvaluator {
+  private readonly baselineCache = new Map<string, EvalValue>();
+
   constructor(private readonly workbook: XLSX.WorkBook) {}
 
   evaluateNumber(
     cellKey: string,
     overrides: Map<string, Primitive> = new Map()
   ): number {
+    const useBaselineCache = overrides.size === 0;
     const context: EvalContext = {
       overrides,
-      cache: new Map(),
+      cache: useBaselineCache ? this.baselineCache : new Map(),
       stack: new Set()
     };
 
