@@ -326,6 +326,54 @@ function detectCycles(nodes: CellNode[]): Finding[] {
   return findings;
 }
 
+function isBoundaryInitializationFormula(
+  candidate: CellNode,
+  band: CellNode[],
+  modalPattern: string
+): boolean {
+  const candidateIndex = band.findIndex(cell => cell.key === candidate.key);
+
+  // v0.4.6 deliberately handles only the left edge of a forecast recurrence.
+  // A terminal-period exception can encode real business logic and should not
+  // be suppressed by this structural heuristic.
+  if (candidateIndex !== 0 || band.length < 4) return false;
+
+  const recurringCells = band.slice(1);
+
+  // Every later period must use the same normalized structure.
+  if (
+    recurringCells.some(
+      cell => !cell.formula || normalizeFormula(cell.formula, cell) !== modalPattern
+    )
+  ) {
+    return false;
+  }
+
+  // The repeated structure must be an actual recurrence: each later period
+  // references the immediately preceding cell in the same row.
+  for (let i = 1; i < band.length; i++) {
+    const current = band[i];
+    const previous = band[i - 1];
+    if (!current.formula) return false;
+
+    const refs = extractRefs(current.formula, current.sheet);
+    const previousKey = `${current.sheet}!${previous.address}`;
+    if (!refs.includes(previousKey)) return false;
+  }
+
+  // The initialization formula itself must not already point backward into
+  // the same recurrence row. It may seed from a hardcode, opening balance,
+  // or another input/formula elsewhere in the workbook.
+  const sameRowBandKeys = new Set(
+    band.slice(1).map(cell => `${cell.sheet}!${cell.address}`)
+  );
+  const candidateRefs = candidate.formula
+    ? extractRefs(candidate.formula, candidate.sheet)
+    : [];
+
+  return !candidateRefs.some(ref => sameRowBandKeys.has(ref));
+}
+
 function detectFormulaOutliers(nodes: CellNode[]): Finding[] {
   const findings: Finding[] = [];
   const bySheetRow = new Map<string, CellNode[]>();
@@ -376,6 +424,10 @@ function detectFormulaOutliers(nodes: CellNode[]): Finding[] {
       for (const c of band) {
         const pattern = normalizeFormula(c.formula!, c);
         if (pattern !== modalPattern && (counts.get(pattern) || 0) === 1) {
+          if (isBoundaryInitializationFormula(c, band, modalPattern)) {
+            continue;
+          }
+
           findings.push({
             id: id("finding"),
             severity: "medium",
