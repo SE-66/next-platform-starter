@@ -960,3 +960,121 @@ describe("ERXL v0.4.3 prior ranking isolation and precision", () => {
     ).toBeGreaterThan(1e-8);
   });
 });
+
+
+function lowPriorWorkingCapitalWorkbookBytes(): ArrayBuffer {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["Metric", "2027E", "2028E", "2029E", "2030E", "2031E"],
+    ["Revenue ($mm)", 500, 550, 605, 665.5, 732.05],
+    ["Capex ($mm)", 25, 28, 31, 34, 37],
+    ["Working Capital ($mm)", null, null, null, null, null]
+  ]);
+
+  for (const col of ["B", "C", "D", "E", "F"]) {
+    const revenue = sheet[col + "2"]?.v as number;
+    const capex = sheet[col + "3"]?.v as number;
+    sheet[col + "4"] = {
+      t: "n",
+      f: col + "2-" + col + "3",
+      v: revenue - capex
+    };
+  }
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Operating_Model");
+  return XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+}
+
+function multiDetectorWorkbookBytes(): ArrayBuffer {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["Metric", "2027E", "2028E", "2029E", "2030E", "2031E"],
+    ["Revenue ($mm)", 500, 550, 605, 665.5, 732.05],
+    ["COGS ($mm)", 300, 327, 356, 388, 423],
+    ["SG&A ($mm)", 70, 74, 78, 82, 87],
+    ["Gross Profit ($mm)", null, null, null, null, null]
+  ]);
+
+  for (const col of ["B", "C", "D", "E", "F"]) {
+    const revenue = sheet[col + "2"]?.v as number;
+    const cogs = sheet[col + "3"]?.v as number;
+    const sga = sheet[col + "4"]?.v as number;
+    const wrong = col === "D";
+    sheet[col + "5"] = {
+      t: "n",
+      f: wrong ? col + "2-" + col + "4" : col + "2-" + col + "3",
+      v: wrong ? revenue - sga : revenue - cogs
+    };
+  }
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Operating_Model");
+  return XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+}
+
+describe("ERXL v0.4.5 pruning, abstention, and issue consolidation", () => {
+  it("abstains instead of promoting a weak working-capital prior", () => {
+    const result = analyzeWorkbook(
+      lowPriorWorkingCapitalWorkbookBytes(),
+      "weak-prior.xlsx"
+    );
+
+    const assessments = result.hypothesisExperiments.filter(
+      item => item.targetRole === "working_capital"
+    );
+
+    expect(assessments.length).toBeGreaterThan(0);
+    expect(assessments.every(item => item.status === "abstained")).toBe(true);
+    expect(
+      assessments.every(
+        item =>
+          (item.preferredPlausibilityScore ?? 1) < 0.72 &&
+          item.mismatch === false
+      )
+    ).toBe(true);
+    expect(result.summary.hypothesisAbstentions).toBeGreaterThan(0);
+  });
+
+  it("keeps strong ratio mismatch experiments active after pruning", () => {
+    const result = analyzeWorkbook(
+      directionalRatioWorkbookBytes(),
+      "pruning-regression.xlsx"
+    );
+
+    const grossMargin = result.hypothesisExperiments.find(
+      item =>
+        item.targetRole === "gross_margin" &&
+        item.sheet === "Operating_Model" &&
+        item.cell === "B7"
+    );
+    const ebitdaMargin = result.hypothesisExperiments.find(
+      item =>
+        item.targetRole === "ebitda_margin" &&
+        item.sheet === "Operating_Model" &&
+        item.cell === "B8"
+    );
+
+    expect(grossMargin?.status).toBe("executed");
+    expect(grossMargin?.mismatch).toBe(true);
+    expect(ebitdaMargin?.status).toBe("executed");
+    expect(ebitdaMargin?.mismatch).toBe(true);
+  });
+
+  it("consolidates multiple detector findings around the same defective cell", () => {
+    const result = analyzeWorkbook(
+      multiDetectorWorkbookBytes(),
+      "multi-detector.xlsx"
+    );
+
+    const family = result.findingIssueFamilies.find(
+      item =>
+        item.sheet === "Operating_Model" &&
+        item.cell === "D5"
+    );
+
+    expect(family).toBeDefined();
+    expect(family!.detectorCodes.length).toBeGreaterThanOrEqual(2);
+    expect(family!.findingIds.length).toBeGreaterThanOrEqual(2);
+    expect(result.findingIssueFamilies.length).toBeLessThan(result.findings.length);
+    expect(result.summary.findings).toBe(result.findingIssueFamilies.length);
+  });
+});
