@@ -11,6 +11,9 @@ import type {
 
 type Dimension = "money" | "rate" | "multiple" | "units" | "price" | "unknown";
 
+const MIN_GENERATED_PRIOR = 0.64;
+const MIN_PREFERRED_PRIOR = 0.72;
+
 const MONEY_ROLES = new Set<SemanticRole>([
   "revenue",
   "cogs",
@@ -727,7 +730,7 @@ function compareHypotheses(
 export function generateAutomaticHypotheses(
   workbook: XLSX.WorkBook,
   nodes: SemanticNode[],
-  maxPerTarget = 12
+  maxPerTarget = 8
 ): GeneratedHypothesis[] {
   const evaluator = new WorkbookEvaluator(workbook);
   const byId = new Map(nodes.map(node => [node.id, node]));
@@ -871,15 +874,19 @@ export function generateAutomaticHypotheses(
         observedSemanticExpression
     );
 
+    const plausibleCandidates = fullyRanked.filter(
+      candidate => candidate.plausibilityScore >= MIN_GENERATED_PRIOR
+    );
+
     const retained = [
-      ...fullyRanked.slice(0, Math.max(2, maxPerTarget - 2)),
+      ...plausibleCandidates.slice(0, Math.max(2, maxPerTarget - 2)),
       ...observedShapeCandidates
     ]
       .filter(
         (candidate, index, array) =>
           array.findIndex(item => item.id === candidate.id) === index
       )
-      .slice(0, maxPerTarget + 2);
+      .slice(0, maxPerTarget);
 
     all.push(...retained);
   }
@@ -1048,9 +1055,52 @@ export function runAutomaticHypothesisExperiments(
       )
       .slice(0, maxCandidatesPerExperiment + 2);
 
-    if (candidates.length < 2) continue;
+    if (!candidates.length) continue;
 
     const preferred = candidates[0];
+
+    if (preferred.plausibilityScore < MIN_PREFERRED_PRIOR) {
+      experiments.push({
+        id: id("hypothesis_experiment"),
+        targetNodeId: target.id,
+        targetKey: target.key,
+        targetRole: target.role,
+        sheet: target.sheet,
+        cell: target.cell,
+        candidateIds: candidates.map(candidate => candidate.id),
+        preferredHypothesisId: preferred.id,
+        preferredExpression: preferred.expression,
+        preferredPlausibilityScore: preferred.plausibilityScore,
+        predictions: [],
+        status: "abstained",
+        mismatch: false,
+        explanation:
+          "ERXL abstained because no generated hypothesis cleared the minimum prior-plausibility threshold."
+      });
+      continue;
+    }
+
+    if (candidates.length < 2) {
+      experiments.push({
+        id: id("hypothesis_experiment"),
+        targetNodeId: target.id,
+        targetKey: target.key,
+        targetRole: target.role,
+        sheet: target.sheet,
+        cell: target.cell,
+        candidateIds: candidates.map(candidate => candidate.id),
+        preferredHypothesisId: preferred.id,
+        preferredExpression: preferred.expression,
+        preferredPlausibilityScore: preferred.plausibilityScore,
+        predictions: [],
+        status: "abstained",
+        mismatch: false,
+        explanation:
+          "ERXL abstained because only one sufficiently plausible candidate remained after pruning."
+      });
+      continue;
+    }
+
     let baselineTarget: number;
 
     try {
@@ -1066,6 +1116,7 @@ export function runAutomaticHypothesisExperiments(
         candidateIds: candidates.map(candidate => candidate.id),
         preferredHypothesisId: preferred.id,
         preferredExpression: preferred.expression,
+        preferredPlausibilityScore: preferred.plausibilityScore,
         predictions: [],
         status: "unsupported",
         mismatch: false,
@@ -1096,6 +1147,7 @@ export function runAutomaticHypothesisExperiments(
         candidateIds: candidates.map(candidate => candidate.id),
         preferredHypothesisId: preferred.id,
         preferredExpression: preferred.expression,
+        preferredPlausibilityScore: preferred.plausibilityScore,
         baselineTarget,
         predictions: [],
         status: "ambiguous",
@@ -1124,6 +1176,7 @@ export function runAutomaticHypothesisExperiments(
         candidateIds: candidates.map(candidate => candidate.id),
         preferredHypothesisId: preferred.id,
         preferredExpression: preferred.expression,
+        preferredPlausibilityScore: preferred.plausibilityScore,
         perturbation: {
           semanticNodeId: perturbation.node.id,
           key: perturbation.node.key,
@@ -1198,6 +1251,7 @@ export function runAutomaticHypothesisExperiments(
         candidateIds: candidates.map(candidate => candidate.id),
         preferredHypothesisId: preferred.id,
         preferredExpression: preferred.expression,
+        preferredPlausibilityScore: preferred.plausibilityScore,
         perturbation: {
           semanticNodeId: perturbation.node.id,
           key: perturbation.node.key,
@@ -1276,6 +1330,7 @@ export function runAutomaticHypothesisExperiments(
       preferredHypothesisId: preferred.id,
       implementedHypothesisId: implemented?.id,
       preferredExpression: preferred.expression,
+      preferredPlausibilityScore: preferred.plausibilityScore,
       implementedExpression: implemented?.expression,
       perturbation: {
         semanticNodeId: perturbation.node.id,
