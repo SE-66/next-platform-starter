@@ -1,6 +1,7 @@
 import type {
   AnalysisResult,
   CounterfactualTest,
+  FindingIssueFamily,
   GeneratedHypothesis,
   HypothesisExperiment,
   SemanticIdentityAssessment,
@@ -184,6 +185,8 @@ function hypothesisExperimentRows(
     preferred_hypothesis_id: experiment.preferredHypothesisId,
     implemented_hypothesis_id: experiment.implementedHypothesisId ?? null,
     preferred_expression: experiment.preferredExpression,
+    preferred_plausibility_score:
+      experiment.preferredPlausibilityScore ?? null,
     implemented_expression: experiment.implementedExpression ?? null,
     perturbation: experiment.perturbation ?? null,
     baseline_target: experiment.baselineTarget ?? null,
@@ -195,6 +198,26 @@ function hypothesisExperimentRows(
     plausibility_gap: experiment.plausibilityGap ?? null,
     explanation: experiment.explanation,
     materiality: experiment.materiality ?? null
+  }));
+}
+
+
+function issueFamilyRows(
+  runId: string,
+  families: FindingIssueFamily[]
+) {
+  return families.map(family => ({
+    id: family.id,
+    analysis_run_id: runId,
+    severity: family.severity,
+    title: family.title,
+    details: family.details,
+    sheet_name: family.sheet ?? null,
+    cell_address: family.cell ?? null,
+    root_cause_cell: family.rootCauseCell ?? null,
+    detector_codes: family.detectorCodes,
+    finding_ids: family.findingIds,
+    evidence: family.evidence ?? {}
   }));
 }
 
@@ -212,12 +235,14 @@ export async function persistAnalysis(
     populated_cell_count: result.summary.populatedCells,
     formula_cell_count: result.summary.formulaCells,
     finding_count: result.summary.findings,
+    finding_issue_family_count: result.summary.findingIssueFamilies,
     semantic_node_count: result.summary.semanticNodes,
     identity_check_count: result.summary.identityChecks,
     identity_violation_count: result.summary.identityViolations,
     identity_violation_group_count: result.summary.identityViolationGroups,
     generated_hypothesis_count: result.summary.generatedHypotheses,
     hypothesis_experiment_count: result.summary.hypothesisExperiments,
+    hypothesis_abstention_count: result.summary.hypothesisAbstentions,
     hypothesis_mismatch_count: result.summary.hypothesisMismatches,
     counterfactual_test_count: result.summary.counterfactualTests,
     tests_passed: result.summary.testsPassed,
@@ -240,6 +265,14 @@ export async function persistAnalysis(
         details: f.details,
         evidence: f.evidence ?? {}
       }))
+    );
+  }
+
+  if (result.findingIssueFamilies.length) {
+    await post(
+      env,
+      "finding_issue_families",
+      issueFamilyRows(result.runId, result.findingIssueFamilies)
     );
   }
 
