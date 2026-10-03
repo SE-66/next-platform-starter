@@ -14,7 +14,12 @@ import {
   generateAutomaticHypotheses,
   runAutomaticHypothesisExperiments
 } from "./automatic-hypotheses";
-import type { AnalysisResult, Finding, Severity } from "./types";
+import type {
+  AnalysisResult,
+  Finding,
+  FindingIssueFamily,
+  Severity
+} from "./types";
 
 const ERROR_VALUES = new Set([
   "#REF!",
@@ -34,6 +39,120 @@ function id(prefix: string): string {
 
 function severityRank(s: Severity): number {
   return { critical: 4, high: 3, medium: 2, low: 1 }[s];
+}
+
+function findingRootCauseCell(finding: Finding): string | undefined {
+  const evidence = finding.evidence || {};
+  const causes = Array.isArray(evidence.rootCauseCandidates)
+    ? evidence.rootCauseCandidates
+    : [];
+
+  const firstCause = causes.find(
+    (cause): cause is { cellKey: string } =>
+      Boolean(
+        cause &&
+          typeof cause === "object" &&
+          "cellKey" in cause &&
+          typeof (cause as { cellKey?: unknown }).cellKey === "string"
+      )
+  );
+
+  if (firstCause?.cellKey) return firstCause.cellKey;
+
+  if (
+    finding.sheet &&
+    finding.cell &&
+    !finding.cell.includes(":") &&
+    !finding.cell.includes(",")
+  ) {
+    return finding.sheet + "!" + finding.cell;
+  }
+
+  const affectedCells = Array.isArray(evidence.affectedCells)
+    ? evidence.affectedCells.filter(
+        (value): value is string => typeof value === "string"
+      )
+    : [];
+
+  if (finding.sheet && affectedCells.length === 1) {
+    return finding.sheet + "!" + affectedCells[0];
+  }
+
+  return undefined;
+}
+
+function consolidateFindingIssueFamilies(
+  findings: Finding[]
+): FindingIssueFamily[] {
+  const buckets = new Map<string, Finding[]>();
+
+  for (const finding of findings) {
+    const rootCauseCell = findingRootCauseCell(finding);
+    const key =
+      rootCauseCell ||
+      (finding.sheet && finding.cell
+        ? finding.sheet + "!" + finding.cell
+        : finding.id);
+
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key)!.push(finding);
+  }
+
+  return [...buckets.entries()]
+    .map(([key, bucket]) => {
+      const ordered = [...bucket].sort(
+        (a, b) => severityRank(b.severity) - severityRank(a.severity)
+      );
+      const primary = ordered[0];
+      const detectorCodes = [
+        ...new Set(ordered.map(finding => finding.code))
+      ];
+      const rootCauseCell = key.includes("!") ? key : undefined;
+      const [rootSheet, rootCell] = rootCauseCell
+        ? [
+            rootCauseCell.slice(0, rootCauseCell.lastIndexOf("!")),
+            rootCauseCell.slice(rootCauseCell.lastIndexOf("!") + 1)
+          ]
+        : [undefined, undefined];
+
+      return {
+        id: id("issue_family"),
+        severity: primary.severity,
+        title:
+          ordered.length > 1
+            ? "Multiple detectors agree: " + primary.title
+            : primary.title,
+        details:
+          ordered.length > 1
+            ? ordered.length +
+              " ERXL detectors converged on the same likely issue/root cause. Primary evidence: " +
+              primary.details
+            : primary.details,
+        sheet: rootSheet || primary.sheet,
+        cell: rootCell || primary.cell,
+        rootCauseCell,
+        detectorCodes,
+        findingIds: ordered.map(finding => finding.id),
+        evidence: {
+          supportingFindings: ordered.map(finding => ({
+            id: finding.id,
+            code: finding.code,
+            severity: finding.severity,
+            title: finding.title,
+            sheet: finding.sheet,
+            cell: finding.cell
+          })),
+          rootCauseCandidates:
+            (primary.evidence?.rootCauseCandidates as unknown[]) || [],
+          materiality: primary.evidence?.materiality
+        }
+      };
+    })
+    .sort(
+      (a, b) =>
+        severityRank(b.severity) - severityRank(a.severity) ||
+        b.detectorCodes.length - a.detectorCodes.length
+    );
 }
 
 function normalizeFormula(formula: string, current: CellNode): string {
@@ -825,11 +944,15 @@ export function analyzeWorkbook(
   }
 
   findings.sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
+  const findingIssueFamilies = consolidateFindingIssueFamilies(findings);
 
   const identityViolations = identityAssessments.filter(
     assessment => assessment.status === "violated"
   ).length;
 
+  const hypothesisAbstentions = hypothesisExperiments.filter(
+    experiment => experiment.status === "abstained"
+  ).length;
   const hypothesisMismatches = hypothesisExperiments.filter(
     experiment => experiment.mismatch
   ).length;
@@ -852,13 +975,16 @@ export function analyzeWorkbook(
       sheets: workbook.SheetNames.length,
       populatedCells,
       formulaCells,
-      findings: findings.length,
+      findings: findingIssueFamilies.length,
+      findingIssueFamilies: findingIssueFamilies.length,
       semanticNodes: semanticNodes.length,
       identityChecks: identityAssessments.length,
       identityViolations,
       identityViolationGroups: identityViolationGroups.length,
       generatedHypotheses: generatedHypotheses.length,
-      hypothesisExperiments: hypothesisExperiments.length,
+      hypothesisExperiments:
+        hypothesisExperiments.length - hypothesisAbstentions,
+      hypothesisAbstentions,
       hypothesisMismatches,
       counterfactualTests: counterfactualTests.length,
       testsPassed,
@@ -866,6 +992,7 @@ export function analyzeWorkbook(
       testsUnsupported
     },
     findings,
+    findingIssueFamilies,
     semanticNodes,
     identityAssessments,
     identityViolationGroups,
