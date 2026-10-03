@@ -41,3 +41,20 @@ If your browser doesn't navigate to the site automatically, visit [localhost:888
 ## Resources
 
 - Check out the [Next.js on Netlify docs](https://docs.netlify.com/frameworks/next-js/overview/)
+
+
+## ERXL v0.5.0 — Adaptive Behavioral Hypothesis Engine
+
+ERXL now treats spreadsheet diagnosis as a bounded sequential hypothesis-testing problem rather than a single fixed perturbation check.
+
+For each semantic target with sufficiently plausible competing formulas, ERXL:
+- converts semantic plausibility scores into an explicit prior probability distribution;
+- incorporates the workbook's baseline observed target value as behavioral evidence without contaminating the semantic prior;
+- searches a bounded positive/negative perturbation grid and selects the next probe by expected information gain;
+- executes the actual workbook under the selected override;
+- updates posterior probabilities for the competing hypotheses;
+- can run up to three sequential probes when uncertainty remains;
+- identifies implemented behavior using aggregate baseline + probe prediction error, while reporting posterior confidence and entropy reduction;
+- records the adaptive probe sequence as a behavioral proof.
+
+The planner remains deterministic and bounded for Cloudflare execution. It is not a claim of globally optimal continuous experimental design.
