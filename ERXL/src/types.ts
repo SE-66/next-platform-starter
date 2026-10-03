@@ -60,6 +60,19 @@ export interface Finding {
   evidence?: Record<string, unknown>;
 }
 
+export interface FindingIssueFamily {
+  id: string;
+  severity: Severity;
+  title: string;
+  details: string;
+  sheet?: string;
+  cell?: string;
+  rootCauseCell?: string;
+  detectorCodes: Finding["code"][];
+  findingIds: string[];
+  evidence?: Record<string, unknown>;
+}
+
 export interface SemanticNode {
   id: string;
   key: string;
@@ -187,7 +200,8 @@ export interface HypothesisExperiment {
   baselineTarget?: number;
   observedTarget?: number;
   predictions: HypothesisPrediction[];
-  status: "executed" | "ambiguous" | "unsupported";
+  status: "executed" | "ambiguous" | "unsupported" | "abstained";
+  preferredPlausibilityScore?: number;
   mismatch: boolean;
   implementedMatchScore?: number;
   plausibilityGap?: number;
@@ -232,6 +246,7 @@ export interface WorkbookSummary {
   populatedCells: number;
   formulaCells: number;
   findings: number;
+  findingIssueFamilies: number;
   semanticNodes: number;
   identityChecks: number;
   identityViolations: number;
@@ -258,6 +273,7 @@ export interface AnalysisResult {
   build?: BuildProvenance;
   summary: WorkbookSummary;
   findings: Finding[];
+  findingIssueFamilies: FindingIssueFamily[];
   semanticNodes: SemanticNode[];
   identityAssessments: SemanticIdentityAssessment[];
   identityViolationGroups: SemanticViolationGroup[];
