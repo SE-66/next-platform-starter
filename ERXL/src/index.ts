@@ -1,3 +1,4 @@
+import { BUILD_INFO } from "./build-info";
 import { analyzeWorkbook } from "./engine";
 import { persistAnalysis, type SupabaseEnv } from "./supabase";
 
@@ -56,7 +57,13 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/health") {
-      return json({ ok: true, service: "ERXL", version: "0.4.2" });
+      return json({
+        ok: true,
+        service: "ERXL",
+        version: BUILD_INFO.version,
+        commit: BUILD_INFO.commit,
+        builtAt: BUILD_INFO.builtAt
+      });
     }
 
     if (url.pathname === "/api/analyze" && request.method === "POST") {
@@ -94,7 +101,8 @@ export default {
           );
         }
 
-        const result = analyzeWorkbook(bytes, upload.name);
+        const analyzed = analyzeWorkbook(bytes, upload.name);
+        const result = { ...analyzed, build: BUILD_INFO };
 
         let persistence: "saved" | "not_configured" | "failed" =
           "not_configured";
