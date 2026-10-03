@@ -30,7 +30,7 @@ jobs:
           BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           cat > ERXL/src/build-info.ts <<EOF
           export const BUILD_INFO = {
-            version: "0.4.6",
+            version: "0.5.0",
             commit: "${GITHUB_SHA}",
             builtAt: "${BUILD_TIME}"
           } as const;
