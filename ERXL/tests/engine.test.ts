@@ -1074,3 +1074,54 @@ describe("ERXL v0.4.5 pruning, abstention, and issue consolidation", () => {
     expect(result.summary.findings).toBe(result.findingIssueFamilies.length);
   });
 });
+
+
+function boundaryInitializationWorkbookBytes(): ArrayBuffer {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["Metric", "2027E", "2028E", "2029E", "2030E", "2031E"],
+    ["PP&E ($mm)", null, null, null, null, null],
+    ["Capex ($mm)", 26, 28, 31, 33, 36],
+    ["D&A ($mm)", 19, 21, 22, 25, 26]
+  ]);
+
+  sheet.B2 = { t: "n", f: "220+B3-B4", v: 227 };
+  sheet.C2 = { t: "n", f: "B2+C3-C4", v: 234 };
+  sheet.D2 = { t: "n", f: "C2+D3-D4", v: 243 };
+  sheet.E2 = { t: "n", f: "D2+E3-E4", v: 251 };
+  sheet.F2 = { t: "n", f: "E2+F3-F4", v: 261 };
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Balance_Sheet");
+  return XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+}
+
+describe("ERXL v0.4.6 boundary-period formula reasoning", () => {
+  it("treats a first-period initialization followed by a clean recurrence as normal", () => {
+    const result = analyzeWorkbook(
+      boundaryInitializationWorkbookBytes(),
+      "boundary-initialization.xlsx"
+    );
+
+    expect(
+      result.findings.some(
+        finding =>
+          finding.code === "FORMULA_OUTLIER" &&
+          finding.sheet === "Balance_Sheet" &&
+          finding.cell === "B2"
+      )
+    ).toBe(false);
+  });
+
+  it("still catches an interior one-off reference defect", () => {
+    const result = analyzeWorkbook(anomalyWorkbookBytes(), "interior-outlier.xlsx");
+
+    expect(
+      result.findings.some(
+        finding =>
+          finding.code === "FORMULA_OUTLIER" &&
+          finding.sheet === "Operating_Model" &&
+          finding.cell === "F2"
+      )
+    ).toBe(true);
+  });
+});
