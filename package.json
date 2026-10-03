@@ -1,31 +1,14 @@
 {
-  "name": "next-netlify-platform-starter",
-  "version": "0.1.0",
-  "type": "module",
+  "name": "erxl-cloudflare-entrypoint",
+  "version": "0.4.2",
   "private": true,
+  "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
-    "dev": "next dev",
-    "build": "cd ERXL && npm install --ignore-scripts && npm run typecheck && npm test",
-    "start": "next start",
-    "lint": "next lint",
-    "erxl:deploy": "npx wrangler deploy"
-  },
-  "dependencies": {
-    "@netlify/blobs": "^10.5.0",
-    "blobshape": "^1.0.0",
-    "bright": "^1.0.0",
-    "markdown-to-jsx": "^7.7.16",
-    "next": "^16.0.8",
-    "react": "19.2.3",
-    "react-dom": "19.2.3",
-    "unique-names-generator": "^4.7.1"
-  },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4.1.15",
-    "babel-plugin-react-compiler": "^1.0.0",
-    "eslint": "9.39.2",
-    "eslint-config-next": "^16.0.8",
-    "postcss": "^8.4.36",
-    "tailwindcss": "^4.1.15"
+    "build": "npm --prefix ERXL install --ignore-scripts --no-audit --no-fund && npm --prefix ERXL run typecheck && npm --prefix ERXL test",
+    "deploy": "npm run build && npx wrangler@4.147.0 deploy",
+    "erxl:deploy": "npm run deploy"
   }
 }
