@@ -323,9 +323,32 @@ form.addEventListener("submit", async event => {
       body: formData
     });
 
-    const data = await response.json();
+    const contentType = response.headers.get("content-type") || "";
+    const raw = await response.text();
+    let data;
+
+    if (contentType.includes("application/json")) {
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        throw new Error(
+          `ERXL received malformed JSON from the server (HTTP ${response.status}).`
+        );
+      }
+    } else {
+      const preview = raw
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 180);
+
+      throw new Error(
+        `ERXL server returned ${contentType || "non-JSON content"} (HTTP ${response.status})${preview ? ": " + preview : ""}`
+      );
+    }
+
     if (!response.ok) {
-      throw new Error(data.error || data.detail || "Analysis failed");
+      throw new Error(data.error || data.detail || `Analysis failed (HTTP ${response.status})`);
     }
 
     renderMetrics(data.summary);
