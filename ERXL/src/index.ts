@@ -1,7 +1,6 @@
 import { BUILD_INFO } from "./build-info";
 import { analyzeWorkbook } from "./engine";
 import { persistAnalysis, type SupabaseEnv } from "./supabase";
-import { resolveArabiziToken } from "./context";
 
 interface Env extends SupabaseEnv {
   ASSETS: Fetcher;
@@ -65,30 +64,6 @@ export default {
         commit: BUILD_INFO.commit,
         builtAt: BUILD_INFO.builtAt
       });
-    }
-
-    if (url.pathname === "/api/context/resolve" && request.method === "POST") {
-      try {
-        const body = (await request.json()) as {
-          token?: unknown;
-          context?: unknown;
-        };
-
-        if (typeof body.token !== "string" || !body.token.trim()) {
-          return json({ error: "Provide a non-empty string field named 'token'." }, 400);
-        }
-
-        const context = typeof body.context === "string" ? body.context : "";
-        return json(resolveArabiziToken(body.token, context));
-      } catch (error) {
-        return json(
-          {
-            error: "Invalid context-resolution request.",
-            detail: error instanceof Error ? error.message : String(error)
-          },
-          400
-        );
-      }
     }
 
     if (url.pathname === "/api/analyze" && request.method === "POST") {
